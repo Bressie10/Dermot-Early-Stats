@@ -1,4 +1,5 @@
 <script>
+  import logo from './assets/doora-barefield.png';
   import { onMount } from 'svelte'
   import { saveSquad, loadSquad, saveMatch, saveDraftMatch, loadDraftMatch, clearDraftMatch } from './db.js'
 
@@ -230,7 +231,7 @@
 <div class="screen">
 
   <div class="setup-hero">
-    <img src="/src/assets/doora-barefield.png" alt="Doora Barefield" class="hero-logo" />
+    <img src={logo} alt="Doora Barefield GAA">
     <div>
       <h2>New Match</h2>
       <p>Doora Barefield GAA · Minor Hurling</p>

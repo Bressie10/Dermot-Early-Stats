@@ -1,4 +1,5 @@
 <script>
+import logo from './assets/doora-barefield.png';
 import { clearAllData } from './lib/db.js'
   import Match from './lib/Match.svelte'
   import PlayerStats from './lib/PlayerStats.svelte'
@@ -65,7 +66,7 @@ import { clearAllData } from './lib/db.js'
 
 {#if $authLoading}
   <div class="loading-screen">
-    <img src="/src/assets/doora-barefield.png" alt="Loading" class="loading-logo" />
+    <img src={logo} alt="Doora Barefield GAA">
   </div>
 
 {:else if !$user}
@@ -73,7 +74,8 @@ import { clearAllData } from './lib/db.js'
 
 {:else if !dataReady}
   <div class="loading-screen">
-    <img src="/src/assets/doora-barefield.png" alt="Loading" class="loading-logo" />
+    <img src={logo} alt="Doora Barefield GAA">
+
     <p style="color:#888; font-size:13px; margin-top:1rem;">Loading your data...</p>
   </div>
 
@@ -81,7 +83,7 @@ import { clearAllData } from './lib/db.js'
   <div class="app">
     <nav>
       <div class="brand">
-        <img src="/src/assets/doora-barefield.png" alt="Doora Barefield GAA" class="brand-logo" />
+        <img src={logo} alt="Doora Barefield GAA">
         Doora Barefield GAA
       </div>
       <div class="tabs">
