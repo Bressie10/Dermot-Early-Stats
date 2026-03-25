@@ -4,6 +4,7 @@
 
   let matches = []
   let selectedMatch = null
+  let filter = 'all'  // 'all' | 'puckouts'
 
   onMount(async () => {
     matches = await loadMatches()
@@ -53,14 +54,29 @@
         on: s.on
       })
     })
+    ;(selectedMatch.puckouts || []).forEach(p => {
+      items.push({
+        type: 'puckout',
+        time: p.time ?? 0,
+        period: p.period,
+        outcome: p.outcome,
+        ourPlayer: p.ourPlayer,
+        oppPlayer: p.oppPlayer,
+        section: p.section
+      })
+    })
     items.sort((a, b) => a.time - b.time)
     return items
   })()
 
+  $: filteredItems = filter === 'puckouts'
+    ? timeline.filter(i => i.type === 'puckout')
+    : timeline
+
   $: grouped = (() => {
     const order = ['Warm-up', '1st Half', '2nd Half', 'Extra Time']
     const groups = {}
-    timeline.forEach(item => {
+    filteredItems.forEach(item => {
       const p = item.period || 'Unknown'
       if (!groups[p]) groups[p] = []
       groups[p].push(item)
@@ -146,6 +162,17 @@
         <span class="stat-pill-val">{(selectedMatch.events || []).filter(e => e.stat === 'Tackle').length}</span>
         <span class="stat-pill-label">Tackles</span>
       </div>
+      {#if (selectedMatch.puckouts || []).length > 0}
+        {@const pw = (selectedMatch.puckouts || []).filter(p => p.outcome === 'won').length}
+        {@const pt = (selectedMatch.puckouts || []).length}
+        <div class="stat-pill clickable" class:pill-active={filter === 'puckouts'} on:click={() => filter = filter === 'puckouts' ? 'all' : 'puckouts'}>
+          <div class="stat-pill-icon green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          </div>
+          <span class="stat-pill-val">{pw}/{pt}</span>
+          <span class="stat-pill-label">Puckouts</span>
+        </div>
+      {/if}
       <div class="stat-pill">
         <div class="stat-pill-icon gray">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
@@ -153,6 +180,13 @@
         <span class="stat-pill-val">{(selectedMatch.subs_log || []).length}</span>
         <span class="stat-pill-label">Subs</span>
       </div>
+    </div>
+
+    <div class="filter-row">
+      <button class="filter-pill" class:active={filter === 'all'} on:click={() => filter = 'all'}>All events</button>
+      {#if (selectedMatch.puckouts || []).length > 0}
+        <button class="filter-pill" class:active={filter === 'puckouts'} on:click={() => filter = 'puckouts'}>Puckouts only</button>
+      {/if}
     </div>
 
     {#each grouped as [period, items]}
@@ -163,7 +197,7 @@
             <div class="timeline-item">
               <div class="timeline-time">{formatTime(item.time)}</div>
               <div class="timeline-track">
-                <div class="timeline-dot {item.type === 'sub' ? 'maroon' : getEventColor(item.stat)}"></div>
+                <div class="timeline-dot {item.type === 'sub' ? 'maroon' : item.type === 'puckout' ? (item.outcome === 'won' ? 'green' : 'red') : getEventColor(item.stat)}"></div>
                 {#if i < items.length - 1}
                   <div class="timeline-line"></div>
                 {/if}
@@ -201,6 +235,19 @@
                     {:else if item.stat === 'Point'}
                       <div class="event-badge point">Point</div>
                     {/if}
+                  </div>
+                {:else if item.type === 'puckout'}
+                  <div class="event-card {item.outcome === 'won' ? 'green' : 'red'}">
+                    <div class="event-icon-wrap {item.outcome === 'won' ? 'green' : 'red'}">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M8 12h8"/></svg>
+                    </div>
+                    <div class="event-info">
+                      <div class="event-stat">Puckout {item.outcome === 'won' ? 'Won' : 'Lost'}</div>
+                      <div class="event-player">
+                        {item.ourPlayer || '—'}{item.section ? ' · ' + item.section.replace('-', ' ') : ''}{item.oppPlayer ? ' vs #' + item.oppPlayer : ''}
+                      </div>
+                    </div>
+                    <div class="event-badge {item.outcome === 'won' ? 'point' : 'wide'}">{item.outcome === 'won' ? 'Won' : 'Lost'}</div>
                   </div>
                 {:else}
                   <div class="event-card sub">
@@ -401,6 +448,26 @@
   .event-badge.goal { background: #e6f4ea; color: #2d7a2d; }
   .event-badge.point { background: #e3f0fb; color: #1565c0; }
   .event-badge.sub { background: #fdf0f2; color: #6B1B2B; }
+
+  .stat-pill.clickable { cursor: pointer; transition: all 0.15s; }
+  .stat-pill.clickable:hover { border-color: #2d7a2d; }
+  .stat-pill.pill-active { border-color: #2d7a2d; background: rgba(45,122,45,0.07); }
+
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .filter-pill {
+    padding: 7px 16px;
+    border-radius: 20px;
+    border: 1px solid var(--input-border);
+    background: none;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+    font-weight: 600;
+    transition: all 0.15s;
+    min-height: 36px;
+  }
+  .filter-pill.active { background: #6B1B2B; color: white; border-color: #6B1B2B; }
 
   @media (max-width: 480px) {
     .timeline-item { grid-template-columns: 40px 20px 1fr; gap: 6px; }

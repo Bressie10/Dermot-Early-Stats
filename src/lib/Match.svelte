@@ -33,12 +33,12 @@
 
   // ── PUCKOUT SECTION ───────────────────────────
   let puckoutSection = null  // 'short'|'own-half'|'midfield'|'opp-half'|'long'
-  const puckoutSections = [
-    { key: 'short',    label: 'Short' },
-    { key: 'own-half', label: 'Own Half' },
-    { key: 'midfield', label: 'Midfield' },
-    { key: 'opp-half', label: 'Opp Half' },
-    { key: 'long',     label: 'Long' }
+  const puckoutZones = [
+    { key: 'short',    label: 'Short',    x: 4,   w: 58 },
+    { key: 'own-half', label: 'Own Half', x: 62,  w: 58 },
+    { key: 'midfield', label: 'Midfield', x: 120, w: 60 },
+    { key: 'opp-half', label: 'Opp Half', x: 180, w: 58 },
+    { key: 'long',     label: 'Long',     x: 238, w: 58 }
   ]
 
   const defaultSquad = Array.from({ length: 20 }, (_, i) => ({
@@ -905,17 +905,45 @@
           {/each}
         </div>
 
-        <div class="modal-section-label">Where did it land? (optional)</div>
-        <div class="section-picker">
-          <div class="pitch-zones">
-            {#each puckoutSections as s}
-              <button
-                class="zone-btn"
-                class:zone-selected={puckoutSection === s.key}
-                on:click={() => puckoutSection = puckoutSection === s.key ? null : s.key}
-              >{s.label}</button>
+        <div class="modal-section-label">Where did it land? (optional) {#if puckoutSection}<span class="zone-hint">— {puckoutZones.find(z => z.key === puckoutSection)?.label} selected</span>{/if}</div>
+        <div class="puckout-pitch-wrap">
+          <svg class="puckout-pitch-svg" viewBox="0 0 300 100">
+            <!-- Pitch background -->
+            <rect width="300" height="100" fill="#2d7a2d" rx="4"/>
+            <!-- Clickable zones -->
+            {#each puckoutZones as zone}
+              <rect
+                x={zone.x} y="4" width={zone.w} height="92"
+                fill={puckoutSection === zone.key ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.07)'}
+                stroke={puckoutSection === zone.key ? 'white' : 'rgba(255,255,255,0.2)'}
+                stroke-width={puckoutSection === zone.key ? '2' : '0.5'}
+                rx="2"
+                style="cursor:pointer"
+                on:click={() => puckoutSection = puckoutSection === zone.key ? null : zone.key}
+              />
+              <text
+                x={zone.x + zone.w / 2} y="53"
+                text-anchor="middle"
+                fill="white"
+                font-size="7.5"
+                font-weight={puckoutSection === zone.key ? 'bold' : 'normal'}
+                opacity={puckoutSection === zone.key ? '1' : '0.75'}
+                style="pointer-events:none"
+              >{zone.label}</text>
             {/each}
-          </div>
+            <!-- Zone dividers -->
+            {#each [62, 120, 180, 238] as dx}
+              <line x1={dx} y1="4" x2={dx} y2="96" stroke="white" stroke-width="0.5" opacity="0.3"/>
+            {/each}
+            <!-- Halfway line -->
+            <line x1="150" y1="4" x2="150" y2="96" stroke="white" stroke-width="1" opacity="0.5" stroke-dasharray="3,3"/>
+            <!-- Goal areas -->
+            <rect x="4" y="28" width="18" height="44" fill="none" stroke="white" stroke-width="0.8" opacity="0.5"/>
+            <rect x="278" y="28" width="18" height="44" fill="none" stroke="white" stroke-width="0.8" opacity="0.5"/>
+            <!-- End labels -->
+            <text x="33" y="14" text-anchor="middle" fill="white" font-size="6" opacity="0.6" style="pointer-events:none">DB END</text>
+            <text x="267" y="14" text-anchor="middle" fill="white" font-size="6" opacity="0.6" style="pointer-events:none">OPP END</text>
+          </svg>
         </div>
 
         <div class="modal-section-label">Opposition player number (optional)</div>
@@ -1573,31 +1601,8 @@
   }
   .cancel-match-btn:hover { border-color: #e53935; color: #e53935; }
 
-  /* ── PUCKOUT SECTION PICKER ── */
-  .section-picker { margin-bottom: 0.5rem; }
-  .pitch-zones {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 4px;
-    background: #2d7a2d;
-    border-radius: 8px;
-    padding: 6px;
-  }
-  .zone-btn {
-    padding: 10px 4px;
-    border-radius: 6px;
-    border: 2px solid transparent;
-    background: rgba(255,255,255,0.15);
-    color: white;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    font-family: inherit;
-    text-align: center;
-    transition: all 0.15s;
-    min-height: 44px;
-    line-height: 1.2;
-  }
-  .zone-btn:hover { background: rgba(255,255,255,0.3); }
-  .zone-btn.zone-selected { background: white; color: #2d7a2d; border-color: white; }
+  /* ── PUCKOUT PITCH ZONE PICKER ── */
+  .puckout-pitch-wrap { border-radius: 8px; overflow: hidden; margin-bottom: 0.5rem; }
+  .puckout-pitch-svg { width: 100%; height: auto; display: block; }
+  .zone-hint { font-weight: 600; color: #2d7a2d; text-transform: none; letter-spacing: 0; font-size: 12px; }
 </style>
