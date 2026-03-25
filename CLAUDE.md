@@ -21,7 +21,7 @@ grounds with no internet.
 | Cloud sync | Supabase (PostgreSQL + Auth) |
 | Charts | Chart.js |
 | Styling | Scoped CSS inside Svelte components |
-| PWA | Service worker (to be added) |
+| PWA | Service worker (`sw.js` + `manifest.json`) |
 | Package manager | npm |
 
 ---
@@ -30,7 +30,9 @@ grounds with no internet.
 ```
 hurling-stats/
 ├── public/
-│   └── favicon.svg
+│   ├── favicon.svg
+│   ├── manifest.json             # PWA manifest
+│   └── sw.js                     # Service worker (cache-first assets, network-first Supabase)
 ├── src/
 │   ├── assets/
 │   │   └── doora-barefield.png       # Club crest — used in nav + setup screen
@@ -122,6 +124,8 @@ All tables have Row Level Security (RLS) enabled. Every row has a `user_id` colu
 ### Routing
 No router library. `App.svelte` uses a single `activePage` string variable and `{#if}` / `{:else if}` blocks to switch between pages.
 
+`Match.svelte` uses its own internal `screen` variable (`'setup'` | `'match'` | `'stats'`) to switch between the setup form, live match logging, and the Quick View Stats panel.
+
 ### State
 - Local component state: Svelte `let` variables
 - Shared global state: Svelte `writable` stores (`auth-store.js`, `settings-store.js`)
@@ -140,6 +144,30 @@ Each logged stat produces an event object:
 ```
 `x` and `y` are percentages (0–100) of pitch width/height. `end` is `'db'` or `'opposition'`. Both can be `null` if the coach skipped location logging.
 
+### Puckout storage
+Each logged puckout produces an object:
+```javascript
+{ outcome, ourPlayer, oppPlayer, section, time, period }
+```
+- `outcome`: `'won'` | `'lost'`
+- `ourPlayer`: DB player name (string) or `null`
+- `oppPlayer`: opposition player number as a string (e.g. `'5'`) or `null`
+- `section`: zone key string (e.g. `'midfield-top'`) or `null` — from the 10-zone pitch map (5 cols × 2 rows)
+
+When `outcome === 'lost'`, `oppPlayer` records which opposition player won the puckout and `ourPlayer` records who was marking them. This enables the marking matchup breakdown (e.g. "Player 1 was marking #5").
+
+### Opposition score storage
+Each logged opposition score produces an object:
+```javascript
+{ type, oppPlayerNum, marker, time, period }
+```
+- `type`: `'goal'` | `'point'`
+- `oppPlayerNum`: opposition player jersey number as a string or `null`
+- `marker`: DB player name who was marking or `null`
+
+### Puckout zone keys
+Zone keys follow the format `'<col>-<row>'`, e.g. `'midfield-top'`. Columns: `short`, `own-half`, `midfield`, `opp-half`, `long`. Rows: `top`, `bottom`. Use `formatZoneLabel(key)` to produce a display string.
+
 ### Colours
 - Primary maroon: `#6B1B2B`
 - Hover/dark maroon: `#551522`
@@ -155,12 +183,42 @@ CSS custom properties defined in `app.css` under `:root` (light) and `[data-them
 - Brand maroon `#6B1B2B` and semantic colours (green/red) are kept as hex — they don't change between themes
 
 ### Auto-save (draft)
-`saveDraft()` is called on every stat tap, sub, score change, and timer tick. It writes the full match state to IndexedDB as `id: 'draft'`. IndexedDB persists across tab/browser close, reload, navigation, and offline — data is only cleared by explicit user action.
+`saveDraft()` is called on every stat tap, sub, score change, puckout log, and timer tick. It writes the full match state to IndexedDB as `id: 'draft'`. IndexedDB persists across tab/browser close, reload, navigation, and offline — data is only cleared by explicit user action.
 
-On app load, if a draft exists `Match.svelte` sets `screen = 'recover'` and shows a professional recovery card. The card displays the opposition, date/venue, live score, event count, and time elapsed. The coach must explicitly tap **Resume Match** (starts timer) or **Discard & Start New** (clears draft, goes to setup). The timer does NOT auto-start — the coach is always in control.
+On app load, if a draft exists `Match.svelte` **auto-resumes it immediately** — there is no "Resume or Discard?" screen. The draft is restored silently and the coach lands directly on the match screen (or stats screen if that was active when the app closed).
+
+The draft saves `screen: 'stats' | 'match'` so the Quick View Stats panel is also restored on reload.
+
+### Timer persistence (wall-clock)
+The timer uses `timerStartedAt = Date.now()` (epoch ms) rather than a pure counter. On app restore, elapsed time since close is calculated: `elapsed = floor((Date.now() - timerStartedAt) / 1000)`. This means the timer is always accurate even if the device was off for 20 minutes.
 
 ### Logo paths
-All logo references use the public-folder relative path `doora-barefield.png` (not `/src/assets/doora-barefield.png`). This applies to `Auth.svelte`, `App.svelte`, and the recovery card in `Match.svelte`.
+All logo references use the public-folder relative path `doora-barefield.png` (not `/src/assets/doora-barefield.png`). This applies to `Auth.svelte` and `App.svelte`.
+
+---
+
+## Quick View Stats (Match.svelte)
+
+Accessed via the **📊 Stats** button in the match action bar at any time during the match. Sets `screen = 'stats'`. The timer keeps running — nothing is paused or frozen.
+
+The stats panel is a series of **collapsible accordions** (`openSections` object, toggled via `toggleSection(k)`):
+
+| Accordion | Key | Shows |
+|---|---|---|
+| Puckouts | `puckouts` | W/L/%, zone heatmap, tap-to-filter zones, by our player (with matchup lines), opposition winners (with who they beat) |
+| Scores Conceded | `conceded` | Goals/points totals, by our marker, by opposition player number |
+| Player Stats | `players` | Full stats table for all players with any stats |
+| Substitutions | `subs` | Sub log with times |
+
+Each accordion header shows a summary badge (wins/losses/%, goals/points, count) so the coach can scan without opening.
+
+Each section shows a **standout callout** (`.standout-row`) — a left-bordered highlight row naming the top/most-dangerous performer in that section.
+
+**Marking matchup lines**: In the puckouts breakdown, each player row shows `Won vs #7` / `Lost to #5` in green/red. Each opposition winner row shows `Marking: Player 1`. This is derived from `ourPlayer` + `oppPlayer` on each puckout object.
+
+**Zone heatmap**: The 10-zone SVG pitch is colour-coded by win rate (green ≥67%, amber 40–66%, red <40%). Tap a zone to filter the breakdown table to that zone only.
+
+All data shown is **live current data** — not a snapshot. The panel always reflects the full match so far.
 
 ---
 
@@ -172,8 +230,10 @@ All logo references use the public-folder relative path `doora-barefield.png` (n
 - **Player identity by name** — if you switch back to ID-based lookup, cross-match stat aggregation breaks
 - **`dataReady` gate in `App.svelte`** — components must not mount until sync is complete or they load stale data
 - **`saveDraft()` on every state change** — removing any of these calls means match data can be lost if the app closes
-- **`screen = 'recover'` on draft load** — do not change this back to auto-resume; the recovery card gives the coach explicit control and prevents accidental data loss
+- **Auto-resume draft** — do not add a "Resume or Discard?" screen back; the draft should restore silently
+- **`timerStartedAt` wall-clock pattern** — do not revert to a pure counter; the wall-clock approach is what keeps the timer accurate after app close
 - **Logo path `doora-barefield.png`** — always use this public-folder path, never `/src/assets/doora-barefield.png`
+- **`ourPlayer` + `oppPlayer` on puckouts** — both fields are needed for the marking matchup breakdown; do not remove either
 
 ---
 
@@ -181,28 +241,32 @@ All logo references use the public-folder relative path `doora-barefield.png` (n
 
 ### Done
 - [x] Match page — live logging, quick mode, player rows mode
-- [x] Timer with auto-resume after app close
+- [x] Timer with wall-clock persistence (accurate after app close/device off)
 - [x] Pitch coordinate picker (DB end vs opposition end)
-- [x] Opposition score tracker
+- [x] Opposition score tracker — log opp player number + which DB player was marking
 - [x] Substitution tracker with log
 - [x] Custom stats (per match)
 - [x] Squad management page (saved between matches)
 - [x] Player Stats — aggregate stats, trend chart, per-match table, compare mode
 - [x] Team Stats — pitch map with stat + period filters, top performers
 - [x] Previous Matches — archive, search, filter, detail view, delete
-- [x] Match Timeline — chronological event feed with SVG icons
+- [x] Match Timeline — chronological event feed with SVG icons, puckout filter pill
 - [x] Settings — team name, age group, default stats, data export
 - [x] Team Targets — set goals per stat, track progress, trend
 - [x] Supabase auth + sync — multi-account, per-coach data isolation
-- [x] Draft auto-save — match survives app close / device off
-- [x] Professional draft recovery card — coach explicitly resumes or discards (no auto-resume, no browser popup)
+- [x] Draft auto-save — match survives app close / device off, auto-resumes silently
 - [x] Logo path standardised — all references use `doora-barefield.png` (public folder)
-
-### Done (continued)
 - [x] PWA offline install — `manifest.json` + `sw.js` (cache-first for assets, network-first for Supabase), registered in `index.html`
-- [x] PDF match report export — `window.print()` + `@media print` CSS in `History.svelte`; nav and UI chrome hidden, print-only header shown
-- [x] Dark mode — CSS custom properties in `app.css` (`:root` light defaults, `[data-theme="dark"]` overrides), toggle in Settings.svelte, `data-theme` attribute driven by `settingsStore.darkMode` in `App.svelte`; all components updated
-- [x] Auto-sync to Supabase — `scheduleAutoSync()` debounced 10s after stat logged, undo, sub, or decrement; NOT called on timer ticks
+- [x] PDF match report export — `window.print()` + `@media print` CSS in `History.svelte`
+- [x] Dark mode — CSS custom properties, toggle in Settings, applied via `data-theme` in `App.svelte`
+- [x] Auto-sync to Supabase — `scheduleAutoSync()` debounced 10s; NOT called on timer ticks
+- [x] Puckout tracking — log every puckout as won/lost, our player, opp player number, zone
+- [x] Puckout zone picker — 10-zone SVG pitch map (5 cols × 2 rows) in the log modal
+- [x] Opposition player tracking on lost puckouts — records which opp player won it and who was marking; shown as matchup lines in stats
+- [x] Cancel match button — confirms then discards draft and returns to setup
+- [x] Quick View Stats panel — `📊 Stats` button in action bar, available at any time during the match; collapsible accordions with live data, zone heatmap, marking breakdowns, standout callouts
+- [x] Match history puckout section — shows opp player winners, marking matchups, biggest winner standouts
+- [x] Match history conceded section — split into by-marker and by-opp-player with standout callouts
 
 ### Still To Build
 - [ ] PWA service worker needs CSS/JS asset URLs injected at build time (currently pre-caches fixed URLs; a proper build step would hash-bust correctly)
