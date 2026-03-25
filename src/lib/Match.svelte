@@ -28,9 +28,6 @@
   let oppScorePlayerNum = ''
   let oppScoreMarker = null   // player name string
 
-  // ── HALFTIME ──────────────────────────────────
-  let halftimeSnapshot = null
-
   // ── PUCKOUT SECTION ───────────────────────────
   let puckoutSection = null  // e.g. 'short-top', 'midfield-bottom'
   const puckoutCols = [
@@ -81,7 +78,6 @@
       subs_log = draft.subs_log || []
       puckouts = draft.puckouts || []
       oppScores = draft.oppScores || []
-      halftimeSnapshot = draft.halftimeSnapshot || null
       if (draft.players?.length > 0) players = draft.players
 
       // Restore timer — if it was running when app closed, calculate real elapsed time
@@ -95,12 +91,7 @@
         timerSeconds = draft.timerSeconds || 0
       }
 
-      // If we were on the halftime screen when the app closed, restore it
-      if (draft.screen === 'halftime' && draft.halftimeSnapshot) {
-        screen = 'halftime'
-      } else {
-        screen = 'match'
-      }
+      screen = draft.screen === 'stats' ? 'stats' : 'match'
     }
   })
 
@@ -117,7 +108,6 @@
     subs_log = []
     puckouts = []
     oppScores = []
-    halftimeSnapshot = null
     matchScore = { home: { goals: 0, points: 0 }, away: { goals: 0, points: 0 } }
     notes = ''
     customStats = []
@@ -258,10 +248,9 @@
         subs_log,
         puckouts,
         oppScores,
-        halftimeSnapshot,
         timerSeconds,
         timerStartedAt: timerRunning ? timerStartedAt : null,
-        screen: screen === 'halftime' ? 'halftime' : 'match'
+        screen: screen === 'stats' ? 'stats' : 'match'
       })
     } catch (e) {
       console.warn('Draft save failed:', e)
@@ -278,7 +267,7 @@
       await saveMatch({
         id: Date.now(), date: matchDate, opposition, venue,
         period, score: matchScore, stats, notes, customStats, events,
-        subs_log, puckouts, oppScores, halftimeSnapshot,
+        subs_log, puckouts, oppScores,
         players: players.map(p => ({ ...p }))
       })
       await clearDraftMatch()
@@ -294,7 +283,6 @@
       subs_log = []
       puckouts = []
       oppScores = []
-      halftimeSnapshot = null
       matchScore = { home: { goals: 0, points: 0 }, away: { goals: 0, points: 0 } }
       notes = ''
       customStats = []
@@ -423,94 +411,42 @@
     scheduleAutoSync($user?.id)
   }
 
-  // ── HALFTIME FUNCTIONS ────────────────────────
-  function endFirstHalf() {
-    if (!confirm('End 1st half and view halftime stats?')) return
-    clearInterval(timerInterval)
-    timerRunning = false
-    timerStartedAt = null
-    halftimeSnapshot = {
-      score: { home: { ...matchScore.home }, away: { ...matchScore.away } },
-      stats: JSON.parse(JSON.stringify(stats)),
-      puckouts: [...puckouts],
-      oppScores: [...oppScores],
-      subs: [...subs_log],
-      timerSeconds,
-      players: players.map(p => ({ ...p }))
-    }
-    period = '2nd Half'
+  // ── QUICK VIEW STATS ──────────────────────────
+  function openStatsView() {
+    screen = 'stats'
     saveDraft()
-    screen = 'halftime'
   }
 
-  function startSecondHalf() {
-    timerSeconds = 0
-    timerStartedAt = Date.now()
-    timerInterval = setInterval(() => { timerSeconds++; saveDraft() }, 1000)
-    timerRunning = true
+  function closeStatsView() {
     screen = 'match'
+    saveDraft()
   }
 
-  // ── HALFTIME COMPUTED STATS ───────────────────
+  // ── QUICK VIEW STATS — all use live data ──────
+  let openSections = { puckouts: true, conceded: true, players: false, subs: false }
+  function toggleSection(k) { openSections[k] = !openSections[k]; openSections = openSections }
+
+  let htPuckoutZoneFilter = null
+
   $: htPuckoutsByPlayer = (() => {
-    const snapshot = halftimeSnapshot
-    if (!snapshot) return []
     const map = {}
-    snapshot.puckouts.forEach(p => {
+    puckouts.forEach(p => {
       const key = p.ourPlayer || 'Unknown'
       if (!map[key]) map[key] = { name: key, won: 0, lost: 0, lostTo: [], wonAgainst: [] }
       if (p.outcome === 'won') {
         map[key].won++
-        if (p.oppPlayer) {
-          const opp = '#' + p.oppPlayer
-          if (!map[key].wonAgainst.includes(opp)) map[key].wonAgainst.push(opp)
-        }
+        if (p.oppPlayer) { const o = '#'+p.oppPlayer; if (!map[key].wonAgainst.includes(o)) map[key].wonAgainst.push(o) }
       } else {
         map[key].lost++
-        if (p.oppPlayer) {
-          const opp = '#' + p.oppPlayer
-          if (!map[key].lostTo.includes(opp)) map[key].lostTo.push(opp)
-        }
+        if (p.oppPlayer) { const o = '#'+p.oppPlayer; if (!map[key].lostTo.includes(o)) map[key].lostTo.push(o) }
       }
     })
     return Object.values(map).sort((a, b) => (b.won + b.lost) - (a.won + a.lost))
   })()
 
-  $: htConcededByMarker = (() => {
-    const snapshot = halftimeSnapshot
-    if (!snapshot) return []
-    const map = {}
-    snapshot.oppScores.forEach(s => {
-      const key = s.marker || 'Unknown'
-      if (!map[key]) map[key] = { marker: key, goals: 0, points: 0, scores: [] }
-      if (s.type === 'goal') map[key].goals++
-      else map[key].points++
-      map[key].scores.push(s)
-    })
-    return Object.values(map).sort((a, b) => (b.goals * 3 + b.points) - (a.goals * 3 + a.points))
-  })()
-
-  $: allPuckoutsByPlayer = (() => {
+  $: htPuckoutByZone = (() => {
     const map = {}
     puckouts.forEach(p => {
-      const key = p.ourPlayer || 'Unknown'
-      if (!map[key]) map[key] = { name: key, won: 0, lost: 0 }
-      if (p.outcome === 'won') map[key].won++
-      else map[key].lost++
-    })
-    return Object.values(map).sort((a, b) => (b.won + b.lost) - (a.won + a.lost))
-  })()
-
-  // ── HALFTIME DROPDOWNS ────────────────────────
-  let openSections = { puckouts: true, conceded: true, players: false, subs: false }
-  function toggleSection(k) { openSections[k] = !openSections[k]; openSections = openSections }
-
-  let htPuckoutZoneFilter = null  // null = all, or a zone key
-
-  $: htPuckoutByZone = (() => {
-    if (!halftimeSnapshot?.puckouts) return {}
-    const map = {}
-    halftimeSnapshot.puckouts.forEach(p => {
       const z = p.section || 'no-zone'
       if (!map[z]) map[z] = { won: 0, lost: 0 }
       if (p.outcome === 'won') map[z].won++; else map[z].lost++
@@ -536,36 +472,9 @@
     return 'rgba(200,50,50,0.6)'
   }
 
-  $: htConcededByOppPlayer = (() => {
-    if (!halftimeSnapshot?.oppScores) return []
-    const map = {}
-    halftimeSnapshot.oppScores.forEach(s => {
-      const k = s.oppPlayerNum ? '#' + s.oppPlayerNum : 'Unknown'
-      if (!map[k]) map[k] = { num: k, goals: 0, points: 0, markers: [] }
-      if (s.type === 'goal') map[k].goals++; else map[k].points++
-      if (s.marker && !map[k].markers.includes(s.marker)) map[k].markers.push(s.marker)
-    })
-    return Object.values(map).sort((a, b) => (b.goals * 3 + b.points) - (a.goals * 3 + a.points))
-  })()
-
-  $: allConcededByMarker = (() => {
-    const map = {}
-    oppScores.forEach(s => {
-      const key = s.marker || 'Unknown'
-      if (!map[key]) map[key] = { marker: key, goals: 0, points: 0, scores: [] }
-      if (s.type === 'goal') map[key].goals++
-      else map[key].points++
-      map[key].scores.push(s)
-    })
-    return Object.values(map).sort((a, b) => (b.goals * 3 + b.points) - (a.goals * 3 + a.points))
-  })()
-
-  // ── OPPOSITION PUCKOUT WINNERS ─────────────────
-  // Groups lost puckouts by the opposition player number who won them
   $: htPuckoutByOppPlayer = (() => {
-    if (!halftimeSnapshot?.puckouts) return []
     const map = {}
-    halftimeSnapshot.puckouts.filter(p => p.outcome === 'lost' && p.oppPlayer).forEach(p => {
+    puckouts.filter(p => p.outcome === 'lost' && p.oppPlayer).forEach(p => {
       const k = '#' + p.oppPlayer
       if (!map[k]) map[k] = { num: k, count: 0, beatPlayers: [] }
       map[k].count++
@@ -574,24 +483,36 @@
     return Object.values(map).sort((a, b) => b.count - a.count)
   })()
 
-  // ── BIGGEST WINNERS PER SECTION ───────────────
-  $: htBestPuckoutPlayer = (() => {
-    if (!htPuckoutsByPlayer.length) return null
-    return htPuckoutsByPlayer.reduce((best, p) => p.won > (best?.won ?? -1) ? p : best, null)
+  $: allConcededByMarker = (() => {
+    const map = {}
+    oppScores.forEach(s => {
+      const key = s.marker || 'Unknown'
+      if (!map[key]) map[key] = { marker: key, goals: 0, points: 0, scores: [] }
+      if (s.type === 'goal') map[key].goals++; else map[key].points++
+      map[key].scores.push(s)
+    })
+    return Object.values(map).sort((a, b) => (b.goals * 3 + b.points) - (a.goals * 3 + a.points))
   })()
 
+  $: htConcededByOppPlayer = (() => {
+    const map = {}
+    oppScores.forEach(s => {
+      const k = s.oppPlayerNum ? '#' + s.oppPlayerNum : 'Unknown'
+      if (!map[k]) map[k] = { num: k, goals: 0, points: 0, markers: [] }
+      if (s.type === 'goal') map[k].goals++; else map[k].points++
+      if (s.marker && !map[k].markers.includes(s.marker)) map[k].markers.push(s.marker)
+    })
+    return Object.values(map).sort((a, b) => (b.goals * 3 + b.points) - (a.goals * 3 + a.points))
+  })()
+
+  $: htBestPuckoutPlayer = htPuckoutsByPlayer.reduce((best, p) => p.won > (best?.won ?? -1) ? p : best, null)
   $: htBestOppPuckoutWinner = htPuckoutByOppPlayer[0] ?? null
+  $: htBiggestConcededOppPlayer = htConcededByOppPlayer[0] ?? null
 
-  $: htBiggestConcededOppPlayer = (() => {
-    if (!htConcededByOppPlayer.length) return null
-    return htConcededByOppPlayer[0]
-  })()
-
-  $: htTopHalfScorer = (() => {
-    if (!halftimeSnapshot) return null
+  $: htTopScorer = (() => {
     let best = null, max = 0
-    ;(halftimeSnapshot.players || []).filter(p => p.name?.trim()).forEach(p => {
-      const s = halftimeSnapshot.stats?.[p.id] || {}
+    players.filter(p => p.name?.trim()).forEach(p => {
+      const s = stats[p.id] || {}
       const pts = (s['Goal'] || 0) * 3 + (s['Point'] || 0)
       if (pts > max) { max = pts; best = { name: p.name, goals: s['Goal'] || 0, points: s['Point'] || 0, pts } }
     })
@@ -716,6 +637,7 @@
     <div class="action-btns">
       <button class="puckout-btn" on:click={openPuckoutModal}>+ Puckout</button>
       <button class="sub-btn" on:click={openSubModal}>⇄ Sub</button>
+      <button class="stats-view-btn" on:click={openStatsView}>📊 Stats</button>
     </div>
   </div>
 
@@ -975,9 +897,6 @@
 
   <div class="finish-row">
     <button class="finish-btn" disabled={finishing} on:click={finishMatch}>{finishing ? 'Saving…' : 'End Match & Save'}</button>
-    {#if period === '1st Half'}
-      <button class="halftime-btn" on:click={endFirstHalf}>End 1st Half &amp; View Halftime Stats</button>
-    {/if}
     <button class="cancel-match-btn" on:click={cancelMatch}>Cancel Match</button>
   </div>
 
@@ -1124,31 +1043,31 @@
 </div>
 {/if}
 
-<!-- HALFTIME SCREEN — persists across navigation and app close -->
-{#if screen === 'halftime'}
+<!-- QUICK VIEW STATS — available at any time, persists across navigation and app close -->
+{#if screen === 'stats'}
 <div class="screen">
 
-  <!-- Sticky score bar -->
+  <!-- Live score bar -->
   <div class="ht-score-bar">
-    <div class="ht-badge">Half Time</div>
+    <div class="ht-badge">{period} · {formatTime(timerSeconds)}</div>
     <div class="ht-score-bar-fixture">
       <div class="ht-score-bar-team">
         <div class="ht-score-bar-name">Doora Barefield</div>
-        <div class="ht-score-bar-val">{halftimeSnapshot ? formatScore(halftimeSnapshot.score.home) : '—'}</div>
+        <div class="ht-score-bar-val">{formatScore(matchScore.home)}</div>
       </div>
       <div class="ht-score-bar-sep">–</div>
       <div class="ht-score-bar-team">
         <div class="ht-score-bar-name">{opposition}</div>
-        <div class="ht-score-bar-val">{halftimeSnapshot ? formatScore(halftimeSnapshot.score.away) : '—'}</div>
+        <div class="ht-score-bar-val">{formatScore(matchScore.away)}</div>
       </div>
     </div>
     <div class="ht-score-bar-meta">{matchDate}{venue ? ' · ' + venue : ''}</div>
   </div>
 
   <!-- ── PUCKOUTS accordion ── -->
-  {#if $settingsStore.halftimeStats?.showPuckouts !== false && halftimeSnapshot?.puckouts?.length > 0}
-    {@const htWins = halftimeSnapshot.puckouts.filter(p => p.outcome === 'won').length}
-    {@const htTotal = halftimeSnapshot.puckouts.length}
+  {#if puckouts.length > 0}
+    {@const htWins = puckouts.filter(p => p.outcome === 'won').length}
+    {@const htTotal = puckouts.length}
     {@const htLosses = htTotal - htWins}
     {@const htWinPct = Math.round((htWins / htTotal) * 100)}
     <div class="accordion-card">
@@ -1187,7 +1106,7 @@
           </div>
 
           <!-- Zone heatmap pitch (tap to filter) -->
-          {#if halftimeSnapshot.puckouts.some(p => p.section)}
+          {#if puckouts.some(p => p.section)}
             <div class="ht-sub-label" style="margin-top:12px">Zone heatmap — tap to filter</div>
             <div class="puckout-pitch-wrap">
               <svg class="puckout-pitch-svg" viewBox="0 0 300 100">
@@ -1301,9 +1220,9 @@
   {/if}
 
   <!-- ── SCORES CONCEDED accordion ── -->
-  {#if $settingsStore.halftimeStats?.showConcededScores !== false && halftimeSnapshot?.oppScores?.length > 0}
-    {@const htGoals = halftimeSnapshot.oppScores.filter(s => s.type === 'goal').length}
-    {@const htPoints = halftimeSnapshot.oppScores.filter(s => s.type === 'point').length}
+  {#if oppScores.length > 0}
+    {@const htGoals = oppScores.filter(s => s.type === 'goal').length}
+    {@const htPoints = oppScores.filter(s => s.type === 'point').length}
     <div class="accordion-card">
       <button class="accordion-header" on:click={() => toggleSection('conceded')}>
         <div class="accordion-title">
@@ -1368,8 +1287,8 @@
   {/if}
 
   <!-- ── PLAYER STATS accordion ── -->
-  {#if $settingsStore.halftimeStats?.showPlayerStats !== false && halftimeSnapshot}
-    {@const playersWithStats = (halftimeSnapshot.players||[]).filter(p => p.name?.trim() && Object.values(halftimeSnapshot.stats?.[p.id]||{}).some(v=>v>0))}
+  {#if players.some(p => p.name?.trim() && Object.values(stats[p.id]||{}).some(v=>v>0))}
+    {@const playersWithStats = players.filter(p => p.name?.trim() && Object.values(stats[p.id]||{}).some(v=>v>0))}
     <div class="accordion-card">
       <button class="accordion-header" on:click={() => toggleSection('players')}>
         <div class="accordion-title">
@@ -1380,13 +1299,13 @@
       </button>
       {#if openSections.players}
         <div class="accordion-body" style="overflow:hidden;">
-          {#if htTopHalfScorer}
+          {#if htTopScorer}
             <div class="standout-row" style="margin-bottom:12px">
               <span class="standout-label">Top scorer</span>
-              <span class="standout-name">{htTopHalfScorer.name}</span>
+              <span class="standout-name">{htTopScorer.name}</span>
               <span class="standout-val">
-                {htTopHalfScorer.goals > 0 ? htTopHalfScorer.goals + 'G ' : ''}{htTopHalfScorer.points > 0 ? htTopHalfScorer.points + 'P' : ''}
-                ({htTopHalfScorer.pts} pts)
+                {htTopScorer.goals > 0 ? htTopScorer.goals + 'G ' : ''}{htTopScorer.points > 0 ? htTopScorer.points + 'P' : ''}
+                ({htTopScorer.pts} pts)
               </span>
             </div>
           {/if}
@@ -1399,8 +1318,8 @@
                 </tr>
               </thead>
               <tbody>
-                {#each (halftimeSnapshot.players||[]).filter(p=>p.name?.trim()) as player}
-                  {@const s = halftimeSnapshot.stats?.[player.id] || {}}
+                {#each players.filter(p=>p.name?.trim()) as player}
+                  {@const s = stats[player.id] || {}}
                   {@const hasStats = Object.values(s).some(v=>v>0)}
                   {#if hasStats}
                     <tr>
@@ -1420,18 +1339,18 @@
   {/if}
 
   <!-- ── SUBSTITUTIONS accordion ── -->
-  {#if $settingsStore.halftimeStats?.showSubs !== false && halftimeSnapshot?.subs?.length > 0}
+  {#if subs_log.length > 0}
     <div class="accordion-card">
       <button class="accordion-header" on:click={() => toggleSection('subs')}>
         <div class="accordion-title">
           <span class="accordion-name">Substitutions</span>
-          <span class="accordion-summary"><span class="badge-pts">{halftimeSnapshot.subs.length} made</span></span>
+          <span class="accordion-summary"><span class="badge-pts">{subs_log.length} made</span></span>
         </div>
         <span class="accordion-chevron">{openSections.subs ? '▲' : '▼'}</span>
       </button>
       {#if openSections.subs}
         <div class="accordion-body">
-          {#each halftimeSnapshot.subs as sub}
+          {#each subs_log as sub}
             <div class="sub-log-row">
               <span class="sub-time">{formatTime(sub.time)}</span>
               <span class="sub-detail">⬇ {sub.off} → ⬆ {sub.on}</span>
@@ -1443,7 +1362,7 @@
     </div>
   {/if}
 
-  <button class="start-second-btn" on:click={startSecondHalf}>Start 2nd Half</button>
+  <button class="back-to-match-btn" on:click={closeStatsView}>← Back to Match</button>
 </div>
 {/if}
 
@@ -1704,22 +1623,38 @@
   .opp-btn-score { border-color: #e53935; color: #e53935; }
   .opp-btn-score:hover { border-color: #e53935; color: #e53935; background: rgba(229,57,53,0.08); }
 
-  /* ── HALFTIME TRIGGER BUTTON ── */
-  .halftime-btn {
-    width: 100%;
-    padding: 13px;
+  /* ── QUICK VIEW STATS BUTTON ── */
+  .stats-view-btn {
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1.5px solid #6B1B2B;
     background: none;
-    border: 2px solid #6B1B2B;
-    border-radius: 10px;
     color: #6B1B2B;
-    font-size: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    font-family: inherit;
+    min-height: 44px;
+    transition: all 0.15s;
+  }
+  .stats-view-btn:hover { background: #6B1B2B; color: white; }
+
+  /* ── BACK TO MATCH BUTTON ── */
+  .back-to-match-btn {
+    width: 100%;
+    padding: 15px;
+    background: #6B1B2B;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
     font-weight: 700;
     cursor: pointer;
     font-family: inherit;
-    transition: all 0.15s;
-    letter-spacing: 0.01em;
+    transition: background 0.2s;
   }
-  .halftime-btn:hover { background: #6B1B2B; color: white; }
+  .back-to-match-btn:hover { background: #551522; }
 
   /* ── PUCKOUT SUMMARY BAR ── */
   .puckout-summary-bar {
@@ -1855,21 +1790,6 @@
   .point-badge { background: rgba(224,160,32,0.12); color: #9a6000; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
 
   .ht-conceded-total { font-size: 14px; font-weight: 600; color: var(--text); }
-
-  .start-second-btn {
-    width: 100%;
-    padding: 16px;
-    background: #6B1B2B;
-    color: white;
-    border: none;
-    border-radius: 12px;
-    font-size: 17px;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: inherit;
-    transition: background 0.2s;
-  }
-  .start-second-btn:hover { background: #551522; }
 
   /* ── CANCEL MATCH + FINISH ROW ── */
   .finish-row { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
