@@ -226,8 +226,14 @@
         const map = {}
         selectedMatch.puckouts.forEach(p => {
           const k = p.ourPlayer || 'Unknown'
-          if (!map[k]) map[k] = { name: k, won: 0, lost: 0 }
-          if (p.outcome === 'won') map[k].won++; else map[k].lost++
+          if (!map[k]) map[k] = { name: k, won: 0, lost: 0, lostTo: [], wonAgainst: [] }
+          if (p.outcome === 'won') {
+            map[k].won++
+            if (p.oppPlayer) { const o = '#'+p.oppPlayer; if (!map[k].wonAgainst.includes(o)) map[k].wonAgainst.push(o) }
+          } else {
+            map[k].lost++
+            if (p.oppPlayer) { const o = '#'+p.oppPlayer; if (!map[k].lostTo.includes(o)) map[k].lostTo.push(o) }
+          }
         })
         return Object.values(map).sort((a,b) => b.won - a.won)
       })()}
@@ -235,8 +241,9 @@
         const map = {}
         selectedMatch.puckouts.filter(p => p.outcome === 'lost' && p.oppPlayer).forEach(p => {
           const k = '#' + p.oppPlayer
-          if (!map[k]) map[k] = { num: k, count: 0 }
+          if (!map[k]) map[k] = { num: k, count: 0, beatPlayers: [] }
           map[k].count++
+          if (p.ourPlayer && !map[k].beatPlayers.includes(p.ourPlayer)) map[k].beatPlayers.push(p.ourPlayer)
         })
         return Object.values(map).sort((a,b) => b.count - a.count)
       })()}
@@ -271,6 +278,12 @@
                   <span class="po-pct">{Math.round(row.won/(row.won+row.lost)*100)}%</span>
                 </span>
               </div>
+              {#if row.wonAgainst.length > 0 || row.lostTo.length > 0}
+                <div class="po-matchup-line">
+                  {#if row.wonAgainst.length > 0}<span class="po-matchup-won">Won vs {row.wonAgainst.join(', ')}</span>{/if}
+                  {#if row.lostTo.length > 0}<span class="po-matchup-lost">Lost to {row.lostTo.join(', ')}</span>{/if}
+                </div>
+              {/if}
             {/each}
           </div>
         {/if}
@@ -289,6 +302,11 @@
                 <span class="po-name">{row.num}</span>
                 <span class="po-badges"><span class="lost-badge">{row.count} won vs us</span></span>
               </div>
+              {#if row.beatPlayers.length > 0}
+                <div class="po-matchup-line">
+                  <span class="po-matchup-lost">Marking: {row.beatPlayers.join(', ')}</span>
+                </div>
+              {/if}
             {/each}
           </div>
         {/if}
@@ -646,6 +664,9 @@
   .lost-badge { background: rgba(229,57,53,0.12); color: #e53935; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
   .po-pct { font-size: 12px; color: var(--text-faint); padding: 2px 4px; }
   .po-sub-label { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); margin: 10px 0 6px; }
+  .po-matchup-line { display: flex; gap: 10px; flex-wrap: wrap; padding: 2px 0 6px; margin-top: -2px; }
+  .po-matchup-won { font-size: 11px; color: #2d7a2d; font-weight: 600; }
+  .po-matchup-lost { font-size: 11px; color: #e53935; font-weight: 600; }
 
   /* ── STANDOUT / BIGGEST WINNER ── */
   .h-standout-row {

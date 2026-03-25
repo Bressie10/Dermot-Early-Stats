@@ -458,9 +458,20 @@
     const map = {}
     snapshot.puckouts.forEach(p => {
       const key = p.ourPlayer || 'Unknown'
-      if (!map[key]) map[key] = { name: key, won: 0, lost: 0 }
-      if (p.outcome === 'won') map[key].won++
-      else map[key].lost++
+      if (!map[key]) map[key] = { name: key, won: 0, lost: 0, lostTo: [], wonAgainst: [] }
+      if (p.outcome === 'won') {
+        map[key].won++
+        if (p.oppPlayer) {
+          const opp = '#' + p.oppPlayer
+          if (!map[key].wonAgainst.includes(opp)) map[key].wonAgainst.push(opp)
+        }
+      } else {
+        map[key].lost++
+        if (p.oppPlayer) {
+          const opp = '#' + p.oppPlayer
+          if (!map[key].lostTo.includes(opp)) map[key].lostTo.push(opp)
+        }
+      }
     })
     return Object.values(map).sort((a, b) => (b.won + b.lost) - (a.won + a.lost))
   })()
@@ -556,8 +567,9 @@
     const map = {}
     halftimeSnapshot.puckouts.filter(p => p.outcome === 'lost' && p.oppPlayer).forEach(p => {
       const k = '#' + p.oppPlayer
-      if (!map[k]) map[k] = { num: k, count: 0 }
+      if (!map[k]) map[k] = { num: k, count: 0, beatPlayers: [] }
       map[k].count++
+      if (p.ourPlayer && !map[k].beatPlayers.includes(p.ourPlayer)) map[k].beatPlayers.push(p.ourPlayer)
     })
     return Object.values(map).sort((a, b) => b.count - a.count)
   })()
@@ -1248,6 +1260,12 @@
                   <span class="lost-badge">{row.lost}L</span>
                   <span class="ht-zone-pct" class:green={pct>=60} class:amber={pct>=40&&pct<60} class:red={pct<40}>{pct}%</span>
                 </span>
+                {#if row.lostTo.length > 0 || row.wonAgainst.length > 0}
+                  <div class="ht-matchup-line">
+                    {#if row.wonAgainst.length > 0}<span class="matchup-won">Won vs {row.wonAgainst.join(', ')}</span>{/if}
+                    {#if row.lostTo.length > 0}<span class="matchup-lost">Lost to {row.lostTo.join(', ')}</span>{/if}
+                  </div>
+                {/if}
                 <div class="ht-zone-bar"><div class="ht-zone-bar-fill" style="width:{pct}%; background:{pct>=60?'#2d7a2d':pct>=40?'#e0a020':'#e53935'}"></div></div>
               </div>
             {/each}
@@ -1269,6 +1287,11 @@
                 <span class="ht-zone-data">
                   <span class="lost-badge">{row.count} won vs us</span>
                 </span>
+                {#if row.beatPlayers.length > 0}
+                  <div class="ht-matchup-line">
+                    <span class="matchup-lost">Marking: {row.beatPlayers.join(', ')}</span>
+                  </div>
+                {/if}
               </div>
             {/each}
           {/if}
@@ -1996,6 +2019,11 @@
   .ht-zone-pct.red { background: rgba(229,57,53,0.12); color: #e53935; }
   .ht-zone-bar { width: 100%; height: 5px; background: var(--surface-2); border-radius: 3px; overflow: hidden; margin-top: 2px; }
   .ht-zone-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+
+  /* ── MATCHUP LINES ── */
+  .ht-matchup-line { width: 100%; display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .matchup-won { font-size: 11px; color: #2d7a2d; font-weight: 600; }
+  .matchup-lost { font-size: 11px; color: #e53935; font-weight: 600; }
 
   /* ── ZONE FILTER RESULT ── */
   .zone-filter-result {
