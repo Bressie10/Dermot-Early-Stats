@@ -7,12 +7,24 @@ const defaults = {
   ageGroup: 'Minor',
   periodLength: 30,
   darkMode: false,
-  defaultStats: ['Point', 'Goal', 'Wide', 'Tackle', 'Block', 'Turnover Won', 'Turnover Lost', 'Free Won']
+  defaultStats: ['Point', 'Goal', 'Wide', 'Tackle', 'Block', 'Turnover Won', 'Turnover Lost', 'Free Won'],
+  halftimeStats: {
+    showScore: true,
+    showPuckouts: true,
+    showConcededScores: true,
+    showPlayerStats: true,
+    showSubs: true
+  }
 }
 
 function createSettingsStore() {
   const stored = localStorage.getItem(SETTINGS_KEY)
-  const initial = stored ? { ...defaults, ...JSON.parse(stored) } : defaults
+  const parsed = stored ? JSON.parse(stored) : {}
+  const initial = {
+    ...defaults,
+    ...parsed,
+    halftimeStats: { ...defaults.halftimeStats, ...(parsed.halftimeStats || {}) }
+  }
 
   const { subscribe, set, update } = writable(initial)
 

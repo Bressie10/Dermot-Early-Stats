@@ -219,6 +219,73 @@
       </div>
     {/if}
 
+    {#if selectedMatch.puckouts?.length > 0}
+      {@const wins = selectedMatch.puckouts.filter(p => p.outcome === 'won').length}
+      {@const total = selectedMatch.puckouts.length}
+      {@const byPlayer = (() => {
+        const map = {}
+        selectedMatch.puckouts.forEach(p => {
+          const k = p.ourPlayer || 'Unknown'
+          if (!map[k]) map[k] = { name: k, won: 0, lost: 0 }
+          if (p.outcome === 'won') map[k].won++; else map[k].lost++
+        })
+        return Object.values(map).sort((a,b) => (b.won+b.lost)-(a.won+a.lost))
+      })()}
+      <div class="card">
+        <div class="section-label" style="margin-bottom:10px">Puckout stats</div>
+        <div class="po-summary-row">
+          <div class="po-stat"><div class="po-val green">{wins}</div><div class="po-label">Won</div></div>
+          <div class="po-divider"></div>
+          <div class="po-stat"><div class="po-val red">{total - wins}</div><div class="po-label">Lost</div></div>
+          <div class="po-divider"></div>
+          <div class="po-stat"><div class="po-val">{total}</div><div class="po-label">Total</div></div>
+          <div class="po-divider"></div>
+          <div class="po-stat"><div class="po-val">{Math.round((wins/total)*100)}%</div><div class="po-label">Win rate</div></div>
+        </div>
+        {#if byPlayer.length > 0}
+          <div class="po-breakdown">
+            {#each byPlayer as row}
+              <div class="po-row">
+                <span class="po-name">{row.name}</span>
+                <span class="po-badges">
+                  <span class="won-badge">{row.won}W</span>
+                  <span class="lost-badge">{row.lost}L</span>
+                </span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    {#if selectedMatch.oppScores?.length > 0}
+      {@const byMarker = (() => {
+        const map = {}
+        selectedMatch.oppScores.forEach(s => {
+          const k = s.marker || 'Unknown'
+          if (!map[k]) map[k] = { marker: k, goals: 0, points: 0, scores: [] }
+          if (s.type === 'goal') map[k].goals++; else map[k].points++
+          map[k].scores.push(s)
+        })
+        return Object.values(map).sort((a,b) => (b.goals*3+b.points)-(a.goals*3+a.points))
+      })()}
+      <div class="card">
+        <div class="section-label" style="margin-bottom:10px">Scores conceded by marker</div>
+        {#each byMarker as row}
+          <div class="marker-row">
+            <span class="marker-name">{row.marker}</span>
+            <span class="marker-tally">
+              {#if row.goals > 0}<span class="conceded-goal">{row.goals}G</span>{/if}
+              {#if row.points > 0}<span class="conceded-point">{row.points}P</span>{/if}
+            </span>
+            <span class="marker-opp">
+              {row.scores.filter(s => s.oppPlayerNum).map(s => '#' + s.oppPlayerNum).join(', ')}
+            </span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
     {#if selectedMatch.notes}
       <div class="card">
         <div class="section-label" style="margin-bottom:8px">Match notes</div>
@@ -481,6 +548,31 @@
   .empty-sub { font-size: 13px; color: var(--text-faint); }
 
   .section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); }
+
+  /* ── PUCKOUT STATS ── */
+  .po-summary-row { display: flex; align-items: center; gap: 12px; background: var(--surface-2); border-radius: 10px; padding: 1rem; margin-bottom: 4px; }
+  .po-stat { text-align: center; flex: 1; }
+  .po-val { font-size: 22px; font-weight: 700; color: var(--text); }
+  .po-val.green { color: #2d7a2d; }
+  .po-val.red { color: #e53935; }
+  .po-label { font-size: 10px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .po-divider { width: 1px; height: 36px; background: var(--divider); flex-shrink: 0; }
+  .po-breakdown { border-top: 1px solid var(--divider-faint); padding-top: 10px; margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+  .po-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--divider-faint); font-size: 13px; }
+  .po-row:last-child { border-bottom: none; }
+  .po-name { font-weight: 600; color: var(--text); }
+  .po-badges { display: flex; gap: 4px; }
+  .won-badge { background: rgba(45,122,45,0.12); color: #2d7a2d; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  .lost-badge { background: rgba(229,57,53,0.12); color: #e53935; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+
+  /* ── CONCEDED BY MARKER ── */
+  .marker-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--divider-faint); font-size: 13px; }
+  .marker-row:last-child { border-bottom: none; }
+  .marker-name { flex: 1; font-weight: 600; color: var(--text); }
+  .marker-tally { display: flex; gap: 4px; flex-shrink: 0; }
+  .marker-opp { font-size: 11px; color: var(--text-faint); flex-shrink: 0; }
+  .conceded-goal { background: rgba(229,57,53,0.12); color: #e53935; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  .conceded-point { background: rgba(224,160,32,0.12); color: #9a6000; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
 
   @media (min-width: 600px) {
     .season-grid { grid-template-columns: repeat(6, 1fr); }

@@ -3,14 +3,33 @@
   import { saveSquad, loadSquad, saveMatch, saveDraftMatch, loadDraftMatch, clearDraftMatch } from './db.js'
   import { user } from './auth-store.js'
   import { scheduleAutoSync } from './sync.js'
+  import { settingsStore } from './settings-store.js'
 
   let screen = 'setup'
+  let finishing = false
   let players = []
   let opposition = ''
   let venue = ''
   let matchDate = new Date().toISOString().split('T')[0]
   let nextId = 21
   let events = []
+
+  // ── PUCKOUT TRACKING ─────────────────────────
+  let puckouts = []
+  let showPuckoutModal = false
+  let puckoutOutcome = null   // 'won' | 'lost'
+  let puckoutOurPlayer = null // player name string
+  let puckoutOppPlayer = ''   // text input
+
+  // ── OPPOSITION SCORE TRACKING ─────────────────
+  let oppScores = []
+  let showOppScoreModal = false
+  let oppScoreType = null     // 'goal' | 'point'
+  let oppScorePlayerNum = ''
+  let oppScoreMarker = null   // player name string
+
+  // ── HALFTIME ──────────────────────────────────
+  let halftimeSnapshot = null
 
   const defaultSquad = Array.from({ length: 20 }, (_, i) => ({
     id: i + 1,
@@ -42,6 +61,9 @@
       customStats = draft.customStats || []
       events = draft.events || []
       subs_log = draft.subs_log || []
+      puckouts = draft.puckouts || []
+      oppScores = draft.oppScores || []
+      halftimeSnapshot = draft.halftimeSnapshot || null
       timerSeconds = draft.timerSeconds || 0
       if (draft.players?.length > 0) players = draft.players
       screen = 'recover'
@@ -62,6 +84,9 @@
     stats = {}
     events = []
     subs_log = []
+    puckouts = []
+    oppScores = []
+    halftimeSnapshot = null
     matchScore = { home: { goals: 0, points: 0 }, away: { goals: 0, points: 0 } }
     notes = ''
     customStats = []
@@ -182,47 +207,67 @@
   function formatScore(s) { return `${s.goals}-${String(s.points).padStart(2, '0')}` }
 
   async function saveDraft() {
-    await saveDraftMatch({
-      date: matchDate,
-      opposition,
-      venue,
-      period,
-      score: matchScore,
-      stats,
-      notes,
-      customStats,
-      events,
-      players: players.map(p => ({ ...p })),
-      subs_log,
-      timerSeconds
-    })
+    try {
+      await saveDraftMatch({
+        date: matchDate,
+        opposition,
+        venue,
+        period,
+        score: matchScore,
+        stats,
+        notes,
+        customStats,
+        events,
+        players: players.map(p => ({ ...p })),
+        subs_log,
+        puckouts,
+        oppScores,
+        halftimeSnapshot,
+        timerSeconds
+      })
+    } catch (e) {
+      console.warn('Draft save failed:', e)
+    }
   }
 
   async function finishMatch() {
     if (!confirm('End match and save stats?')) return
+    if (finishing) return
+    finishing = true
     clearInterval(timerInterval)
     timerRunning = false
-    await saveMatch({
-      id: Date.now(), date: matchDate, opposition, venue,
-      period, score: matchScore, stats, notes, customStats, events,
-      subs_log,
-      players: players.map(p => ({ ...p }))
-    })
-    await clearDraftMatch()
-    // Reset all state
-    opposition = ''
-    venue = ''
-    matchDate = new Date().toISOString().split('T')[0]
-    stats = {}
-    events = []
-    subs_log = []
-    matchScore = { home: { goals: 0, points: 0 }, away: { goals: 0, points: 0 } }
-    notes = ''
-    customStats = []
-    timerSeconds = 0
-    period = '1st Half'
-    screen = 'setup'
-    alert('Match saved!')
+    try {
+      await saveMatch({
+        id: Date.now(), date: matchDate, opposition, venue,
+        period, score: matchScore, stats, notes, customStats, events,
+        subs_log, puckouts, oppScores, halftimeSnapshot,
+        players: players.map(p => ({ ...p }))
+      })
+      await clearDraftMatch()
+      // Reset all state
+      opposition = ''
+      venue = ''
+      matchDate = new Date().toISOString().split('T')[0]
+      stats = {}
+      events = []
+      subs_log = []
+      puckouts = []
+      oppScores = []
+      halftimeSnapshot = null
+      matchScore = { home: { goals: 0, points: 0 }, away: { goals: 0, points: 0 } }
+      notes = ''
+      customStats = []
+      timerSeconds = 0
+      period = '1st Half'
+      screen = 'setup'
+      alert('Match saved!')
+    } catch (e) {
+      alert('Save failed — please try again. Your match data is still safe.')
+      timerInterval = setInterval(() => { timerSeconds++; saveDraft() }, 1000)
+      timerRunning = true
+    } finally {
+      finishing = false
+    }
   }
 
   $: starters = players.filter(p => p.position !== 'Sub')
@@ -268,6 +313,135 @@
 
   function resetTimer() { clearInterval(timerInterval); timerRunning = false; timerSeconds = 0; saveDraft() }
   function formatTime(s) { return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}` }
+
+  // ── PUCKOUT FUNCTIONS ────────────────────────
+  function openPuckoutModal() {
+    puckoutOutcome = null
+    puckoutOurPlayer = null
+    puckoutOppPlayer = ''
+    showPuckoutModal = true
+  }
+
+  function logPuckout() {
+    if (!puckoutOutcome) return
+    puckouts = [...puckouts, {
+      outcome: puckoutOutcome,
+      ourPlayer: puckoutOurPlayer,
+      oppPlayer: puckoutOppPlayer.trim() || null,
+      time: timerSeconds,
+      period
+    }]
+    showPuckoutModal = false
+    saveDraft()
+    scheduleAutoSync($user?.id)
+  }
+
+  $: puckoutWins = puckouts.filter(p => p.outcome === 'won').length
+  $: puckoutLosses = puckouts.filter(p => p.outcome === 'lost').length
+  $: puckoutTotal = puckouts.length
+
+  // ── OPPOSITION SCORE FUNCTIONS ────────────────
+  function openOppScoreModal(type) {
+    oppScoreType = type
+    oppScorePlayerNum = ''
+    oppScoreMarker = null
+    showOppScoreModal = true
+  }
+
+  function confirmOppScore(withDetails) {
+    if (oppScoreType === 'point') matchScore.away.points++
+    if (oppScoreType === 'goal') matchScore.away.goals++
+    if (withDetails) {
+      oppScores = [...oppScores, {
+        type: oppScoreType,
+        oppPlayerNum: oppScorePlayerNum.trim() || null,
+        marker: oppScoreMarker,
+        time: timerSeconds,
+        period
+      }]
+    }
+    matchScore = matchScore
+    showOppScoreModal = false
+    saveDraft()
+    scheduleAutoSync($user?.id)
+  }
+
+  // ── HALFTIME FUNCTIONS ────────────────────────
+  function endFirstHalf() {
+    if (!confirm('End 1st half and view halftime stats?')) return
+    clearInterval(timerInterval)
+    timerRunning = false
+    halftimeSnapshot = {
+      score: { home: { ...matchScore.home }, away: { ...matchScore.away } },
+      stats: JSON.parse(JSON.stringify(stats)),
+      puckouts: [...puckouts],
+      oppScores: [...oppScores],
+      subs: [...subs_log],
+      timerSeconds,
+      players: players.map(p => ({ ...p }))
+    }
+    period = '2nd Half'
+    saveDraft()
+    screen = 'halftime'
+  }
+
+  function startSecondHalf() {
+    timerSeconds = 0
+    timerInterval = setInterval(() => { timerSeconds++; saveDraft() }, 1000)
+    timerRunning = true
+    screen = 'match'
+  }
+
+  // ── HALFTIME COMPUTED STATS ───────────────────
+  $: htPuckoutsByPlayer = (() => {
+    const snapshot = halftimeSnapshot
+    if (!snapshot) return []
+    const map = {}
+    snapshot.puckouts.forEach(p => {
+      const key = p.ourPlayer || 'Unknown'
+      if (!map[key]) map[key] = { name: key, won: 0, lost: 0 }
+      if (p.outcome === 'won') map[key].won++
+      else map[key].lost++
+    })
+    return Object.values(map).sort((a, b) => (b.won + b.lost) - (a.won + a.lost))
+  })()
+
+  $: htConcededByMarker = (() => {
+    const snapshot = halftimeSnapshot
+    if (!snapshot) return []
+    const map = {}
+    snapshot.oppScores.forEach(s => {
+      const key = s.marker || 'Unknown'
+      if (!map[key]) map[key] = { marker: key, goals: 0, points: 0, scores: [] }
+      if (s.type === 'goal') map[key].goals++
+      else map[key].points++
+      map[key].scores.push(s)
+    })
+    return Object.values(map).sort((a, b) => (b.goals * 3 + b.points) - (a.goals * 3 + a.points))
+  })()
+
+  $: allPuckoutsByPlayer = (() => {
+    const map = {}
+    puckouts.forEach(p => {
+      const key = p.ourPlayer || 'Unknown'
+      if (!map[key]) map[key] = { name: key, won: 0, lost: 0 }
+      if (p.outcome === 'won') map[key].won++
+      else map[key].lost++
+    })
+    return Object.values(map).sort((a, b) => (b.won + b.lost) - (a.won + a.lost))
+  })()
+
+  $: allConcededByMarker = (() => {
+    const map = {}
+    oppScores.forEach(s => {
+      const key = s.marker || 'Unknown'
+      if (!map[key]) map[key] = { marker: key, goals: 0, points: 0, scores: [] }
+      if (s.type === 'goal') map[key].goals++
+      else map[key].points++
+      map[key].scores.push(s)
+    })
+    return Object.values(map).sort((a, b) => (b.goals * 3 + b.points) - (a.goals * 3 + a.points))
+  })()
 </script>
 
 {#if screen === 'recover'}
@@ -405,9 +579,9 @@
         <div class="score-val">{formatScore(matchScore.away)}</div>
         <div class="opp-btns">
           <button class="opp-btn" on:click={() => { if(matchScore.away.points>0) matchScore.away.points--; matchScore=matchScore; saveDraft() }}>−P</button>
-          <button class="opp-btn" on:click={() => { matchScore.away.points++; matchScore=matchScore; saveDraft() }}>+P</button>
+          <button class="opp-btn opp-btn-score" on:click={() => openOppScoreModal('point')}>+P</button>
           <button class="opp-btn" on:click={() => { if(matchScore.away.goals>0) matchScore.away.goals--; matchScore=matchScore; saveDraft() }}>−G</button>
-          <button class="opp-btn" on:click={() => { matchScore.away.goals++; matchScore=matchScore; saveDraft() }}>+G</button>
+          <button class="opp-btn opp-btn-score" on:click={() => openOppScoreModal('goal')}>+G</button>
         </div>
       </div>
     </div>
@@ -439,8 +613,25 @@
       <button class:active={mode === 'quick'} on:click={() => mode = 'quick'}>Quick log</button>
       <button class:active={mode === 'player'} on:click={() => mode = 'player'}>Player rows</button>
     </div>
-    <button class="sub-btn" on:click={openSubModal}>⇄ Sub</button>
+    <div class="action-btns">
+      <button class="puckout-btn" on:click={openPuckoutModal}>+ Puckout</button>
+      <button class="sub-btn" on:click={openSubModal}>⇄ Sub</button>
+    </div>
   </div>
+
+  {#if period === '1st Half'}
+    <button class="halftime-btn" on:click={endFirstHalf}>End 1st Half — View Halftime Stats</button>
+  {/if}
+
+  {#if puckoutTotal > 0}
+    <div class="puckout-summary-bar">
+      <span class="puckout-summary-label">Puckouts</span>
+      <span class="puckout-won">{puckoutWins} Won</span>
+      <span class="puckout-divider">/</span>
+      <span class="puckout-lost">{puckoutLosses} Lost</span>
+      {#if puckoutTotal > 0}<span class="puckout-pct">({Math.round((puckoutWins/puckoutTotal)*100)}%)</span>{/if}
+    </div>
+  {/if}
 
   {#if lastEventLabel}
     <div class="undo-row">
@@ -663,12 +854,272 @@
     </div>
   {/if}
 
+  {#if oppScores.length > 0}
+    <div class="card conceded-summary">
+      <div class="section-label" style="margin-bottom:10px">Scores conceded</div>
+      {#each allConcededByMarker as row}
+        <div class="conceded-row">
+          <span class="conceded-marker">{row.marker}</span>
+          <span class="conceded-tally">
+            {#if row.goals > 0}<span class="conceded-goal">{row.goals}G</span>{/if}
+            {#if row.points > 0}<span class="conceded-point">{row.points}P</span>{/if}
+          </span>
+          <span class="conceded-opp">
+            {row.scores.filter(s => s.oppPlayerNum).map(s => '#' + s.oppPlayerNum).join(', ')}
+          </span>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
   <div class="notes-section">
     <div class="section-label">Match notes</div>
     <textarea bind:value={notes} placeholder="Add notes about the match..." on:input={saveDraft}></textarea>
   </div>
 
-  <button class="finish-btn" on:click={finishMatch}>End Match & Save</button>
+  <button class="finish-btn" disabled={finishing} on:click={finishMatch}>{finishing ? 'Saving…' : 'End Match & Save'}</button>
+
+  <!-- PUCKOUT MODAL -->
+  {#if showPuckoutModal}
+    <div class="modal-backdrop" on:click={() => showPuckoutModal = false}>
+      <div class="modal" on:click|stopPropagation>
+        <div class="modal-title">Log Puckout</div>
+
+        <div class="puckout-outcome-row">
+          <button
+            class="outcome-btn won"
+            class:selected={puckoutOutcome === 'won'}
+            on:click={() => puckoutOutcome = 'won'}
+          >We Won</button>
+          <button
+            class="outcome-btn lost"
+            class:selected={puckoutOutcome === 'lost'}
+            on:click={() => puckoutOutcome = 'lost'}
+          >They Won</button>
+        </div>
+
+        <div class="modal-section-label">Our player involved (optional)</div>
+        <div class="player-grid">
+          {#each players.filter(p => p.name?.trim()) as player}
+            <button
+              class="player-btn"
+              class:selected-player={puckoutOurPlayer === player.name}
+              on:click={() => puckoutOurPlayer = puckoutOurPlayer === player.name ? null : player.name}
+            >
+              <span class="player-num">#{player.number}</span>
+              <span class="player-name">{player.name}</span>
+            </button>
+          {/each}
+        </div>
+
+        <div class="modal-section-label">Opposition player number (optional)</div>
+        <input
+          class="modal-input"
+          bind:value={puckoutOppPlayer}
+          placeholder="e.g. 6"
+          type="text"
+          inputmode="numeric"
+        />
+
+        <button
+          class="confirm-log-btn"
+          class:disabled={!puckoutOutcome}
+          on:click={logPuckout}
+          disabled={!puckoutOutcome}
+        >Log Puckout</button>
+        <button class="cancel-btn" on:click={() => showPuckoutModal = false}>Cancel</button>
+      </div>
+    </div>
+  {/if}
+
+  <!-- OPPOSITION SCORE MODAL -->
+  {#if showOppScoreModal}
+    <div class="modal-backdrop" on:click={() => showOppScoreModal = false}>
+      <div class="modal" on:click|stopPropagation>
+        <div class="modal-title">
+          Opposition {oppScoreType === 'goal' ? 'Goal' : 'Point'}
+          <span class="optional-tag">vs {opposition}</span>
+        </div>
+
+        <div class="modal-section-label">Opposition player number (optional)</div>
+        <input
+          class="modal-input"
+          bind:value={oppScorePlayerNum}
+          placeholder="e.g. 14"
+          type="text"
+          inputmode="numeric"
+          autofocus
+        />
+
+        <div class="modal-section-label">Which of our players was marking? (optional)</div>
+        <div class="player-grid">
+          {#each players.filter(p => p.name?.trim()) as player}
+            <button
+              class="player-btn"
+              class:selected-player={oppScoreMarker === player.name}
+              on:click={() => oppScoreMarker = oppScoreMarker === player.name ? null : player.name}
+            >
+              <span class="player-num">#{player.number}</span>
+              <span class="player-name">{player.name}</span>
+            </button>
+          {/each}
+        </div>
+
+        <button class="confirm-log-btn" on:click={() => confirmOppScore(true)}>Log Score + Details</button>
+        <button class="ghost-btn" style="margin-top:8px" on:click={() => confirmOppScore(false)}>Just add score (no details)</button>
+        <button class="cancel-btn" on:click={() => showOppScoreModal = false}>Cancel</button>
+      </div>
+    </div>
+  {/if}
+
+</div>
+{/if}
+
+<!-- HALFTIME SCREEN -->
+{#if screen === 'halftime'}
+<div class="screen">
+  <div class="ht-header">
+    <div class="ht-badge">Half Time</div>
+    <h2 class="ht-title">DB <span class="vs">vs</span> {opposition}</h2>
+    <div class="ht-meta">{matchDate}{venue ? ' · ' + venue : ''}</div>
+  </div>
+
+  {#if $settingsStore.halftimeStats?.showScore !== false}
+    <div class="card ht-score-card">
+      <div class="ht-score-row">
+        <div class="ht-score-team">
+          <div class="ht-team-name">Doora Barefield</div>
+          <div class="ht-score">{halftimeSnapshot ? formatScore(halftimeSnapshot.score.home) : '—'}</div>
+        </div>
+        <div class="ht-score-divider">–</div>
+        <div class="ht-score-team right">
+          <div class="ht-team-name">{opposition}</div>
+          <div class="ht-score">{halftimeSnapshot ? formatScore(halftimeSnapshot.score.away) : '—'}</div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if $settingsStore.halftimeStats?.showPuckouts !== false && halftimeSnapshot?.puckouts?.length > 0}
+    {@const htWins = halftimeSnapshot.puckouts.filter(p => p.outcome === 'won').length}
+    {@const htTotal = halftimeSnapshot.puckouts.length}
+    <div class="card">
+      <div class="section-label" style="margin-bottom:10px">Puckouts</div>
+      <div class="ht-stats-row">
+        <div class="ht-stat-block">
+          <div class="ht-stat-val green">{htWins}</div>
+          <div class="ht-stat-label">Won</div>
+        </div>
+        <div class="ht-stat-divider"></div>
+        <div class="ht-stat-block">
+          <div class="ht-stat-val red">{htTotal - htWins}</div>
+          <div class="ht-stat-label">Lost</div>
+        </div>
+        <div class="ht-stat-divider"></div>
+        <div class="ht-stat-block">
+          <div class="ht-stat-val">{htTotal}</div>
+          <div class="ht-stat-label">Total</div>
+        </div>
+        <div class="ht-stat-divider"></div>
+        <div class="ht-stat-block">
+          <div class="ht-stat-val">{Math.round((htWins/htTotal)*100)}%</div>
+          <div class="ht-stat-label">Win rate</div>
+        </div>
+      </div>
+      {#if htPuckoutsByPlayer.length > 0}
+        <div class="ht-breakdown">
+          <div class="ht-breakdown-title">By player</div>
+          {#each htPuckoutsByPlayer as row}
+            <div class="ht-breakdown-row">
+              <span class="ht-breakdown-name">{row.name}</span>
+              <span class="ht-breakdown-vals">
+                <span class="won-badge">{row.won}W</span>
+                <span class="lost-badge">{row.lost}L</span>
+              </span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  {#if $settingsStore.halftimeStats?.showConcededScores !== false && halftimeSnapshot?.oppScores?.length > 0}
+    {@const htGoals = halftimeSnapshot.oppScores.filter(s => s.type === 'goal').length}
+    {@const htPoints = halftimeSnapshot.oppScores.filter(s => s.type === 'point').length}
+    <div class="card">
+      <div class="section-label" style="margin-bottom:10px">Scores conceded</div>
+      <div class="ht-conceded-total">
+        {htGoals > 0 ? `${htGoals} goal${htGoals > 1 ? 's' : ''}` : ''}
+        {htGoals > 0 && htPoints > 0 ? ', ' : ''}
+        {htPoints > 0 ? `${htPoints} point${htPoints > 1 ? 's' : ''}` : ''}
+        {' '}({htGoals * 3 + htPoints} pts)
+      </div>
+      {#if htConcededByMarker.length > 0}
+        <div class="ht-breakdown" style="margin-top:10px">
+          <div class="ht-breakdown-title">By marker</div>
+          {#each htConcededByMarker as row}
+            <div class="ht-breakdown-row">
+              <span class="ht-breakdown-name">{row.marker}</span>
+              <span class="ht-breakdown-vals">
+                {#if row.goals > 0}<span class="goal-badge">{row.goals}G</span>{/if}
+                {#if row.points > 0}<span class="point-badge">{row.points}P</span>{/if}
+              </span>
+              <span class="ht-opp-nums">
+                {row.scores.filter(s => s.oppPlayerNum).map(s => '#' + s.oppPlayerNum).join(', ')}
+              </span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
+  {#if $settingsStore.halftimeStats?.showPlayerStats !== false && halftimeSnapshot}
+    <div class="card" style="padding:0; overflow:hidden;">
+      <div style="padding:1rem 1rem 0.5rem;">
+        <div class="section-label">Player stats (1st half)</div>
+      </div>
+      <div class="table-wrap">
+        <table class="player-table">
+          <thead>
+            <tr>
+              <th class="th-player">Player</th>
+              {#each allStats as stat}<th>{stat.split(' ')[0]}</th>{/each}
+            </tr>
+          </thead>
+          <tbody>
+            {#each (halftimeSnapshot.players || []).filter(p => p.position !== 'Sub' && p.name?.trim()) as player}
+              {@const s = halftimeSnapshot.stats?.[player.id] || {}}
+              {@const hasStats = Object.values(s).some(v => v > 0)}
+              {#if hasStats}
+                <tr>
+                  <td class="td-player"><span class="num-badge">#{player.number}</span>{player.name}</td>
+                  {#each allStats as stat}
+                    <td>{s[stat] || 0}</td>
+                  {/each}
+                </tr>
+              {/if}
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {/if}
+
+  {#if $settingsStore.halftimeStats?.showSubs !== false && halftimeSnapshot?.subs?.length > 0}
+    <div class="card">
+      <div class="section-label" style="margin-bottom:8px">Substitutions</div>
+      {#each halftimeSnapshot.subs as sub}
+        <div class="sub-log-row">
+          <span class="sub-time">{formatTime(sub.time)}</span>
+          <span class="sub-detail">⬇ {sub.off} → ⬆ {sub.on}</span>
+          <span class="sub-period">{sub.period}</span>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
+  <button class="start-second-btn" on:click={startSecondHalf}>Start 2nd Half</button>
 </div>
 {/if}
 
@@ -886,7 +1337,8 @@
   textarea { width: 100%; min-height: 80px; border: 1px solid var(--input-border); border-radius: 8px; padding: 12px 14px; font-size: 16px; font-family: inherit; color: var(--text); resize: vertical; background: var(--surface); }
   textarea:focus { outline: none; border-color: #6B1B2B; }
   .finish-btn { width: 100%; padding: 15px; background: var(--text); color: var(--bg); border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px; font-family: inherit; }
-  .finish-btn:hover { opacity: 0.85; }
+  .finish-btn:hover:not(:disabled) { opacity: 0.85; }
+  .finish-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   @media (max-width: 480px) {
     .match-header { flex-direction: column; align-items: flex-start; }
     .scoreboard { width: 100%; justify-content: center; }
@@ -909,4 +1361,192 @@
   @media (min-width: 769px) {
     .stat-grid { grid-template-columns: repeat(4, 1fr); }
   }
+
+  /* ── ACTION BUTTONS ── */
+  .action-btns { display: flex; gap: 6px; }
+  .puckout-btn {
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1.5px solid #2d7a2d;
+    background: none;
+    color: #2d7a2d;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    font-family: inherit;
+    min-height: 44px;
+    transition: all 0.15s;
+  }
+  .puckout-btn:hover { background: #2d7a2d; color: white; }
+
+  .opp-btn-score { border-color: #e53935; color: #e53935; }
+  .opp-btn-score:hover { border-color: #e53935; color: #e53935; background: rgba(229,57,53,0.08); }
+
+  /* ── HALFTIME TRIGGER BUTTON ── */
+  .halftime-btn {
+    width: 100%;
+    padding: 13px;
+    background: none;
+    border: 2px solid #6B1B2B;
+    border-radius: 10px;
+    color: #6B1B2B;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+    letter-spacing: 0.01em;
+  }
+  .halftime-btn:hover { background: #6B1B2B; color: white; }
+
+  /* ── PUCKOUT SUMMARY BAR ── */
+  .puckout-summary-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px;
+  }
+  .puckout-summary-label { font-weight: 700; color: var(--text); flex: none; }
+  .puckout-won { color: #2d7a2d; font-weight: 700; }
+  .puckout-lost { color: #e53935; font-weight: 700; }
+  .puckout-divider { color: var(--text-faint); }
+  .puckout-pct { color: var(--text-faint); font-size: 12px; margin-left: auto; }
+
+  /* ── CONCEDED SUMMARY ── */
+  .conceded-summary { display: flex; flex-direction: column; gap: 6px; }
+  .conceded-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--divider-faint); font-size: 13px; }
+  .conceded-row:last-child { border-bottom: none; }
+  .conceded-marker { flex: 1; font-weight: 600; color: var(--text); }
+  .conceded-tally { display: flex; gap: 4px; flex-shrink: 0; }
+  .conceded-goal { background: rgba(229,57,53,0.12); color: #e53935; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  .conceded-point { background: rgba(224,160,32,0.12); color: #9a6000; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  .conceded-opp { font-size: 11px; color: var(--text-faint); flex-shrink: 0; }
+
+  /* ── MODAL ADDITIONS ── */
+  .puckout-outcome-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 0.75rem; }
+  .outcome-btn {
+    padding: 18px 12px;
+    border-radius: 10px;
+    border: 2px solid var(--input-border);
+    background: var(--surface);
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .outcome-btn.won { color: #2d7a2d; }
+  .outcome-btn.won.selected { background: #2d7a2d; color: white; border-color: #2d7a2d; }
+  .outcome-btn.lost { color: #e53935; }
+  .outcome-btn.lost.selected { background: #e53935; color: white; border-color: #e53935; }
+  .outcome-btn:not(.selected):hover { border-color: #6B1B2B; }
+
+  .modal-input {
+    width: 100%;
+    padding: 13px 14px;
+    border: 1.5px solid var(--input-border);
+    border-radius: 10px;
+    font-size: 18px;
+    font-family: inherit;
+    background: var(--surface-3);
+    color: var(--text);
+    margin-bottom: 0.5rem;
+    min-height: 50px;
+  }
+  .modal-input:focus { outline: none; border-color: #6B1B2B; background: var(--surface); }
+
+  .selected-player { border-color: #6B1B2B; background: rgba(107,27,43,0.1); }
+
+  .confirm-log-btn {
+    width: 100%;
+    margin-top: 1rem;
+    padding: 15px;
+    border-radius: 10px;
+    border: none;
+    background: #6B1B2B;
+    color: white;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    min-height: 50px;
+    transition: background 0.15s;
+  }
+  .confirm-log-btn:hover:not(:disabled) { background: #551522; }
+  .confirm-log-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── HALFTIME SCREEN ── */
+  .ht-header { text-align: center; padding: 1rem 0 0.5rem; }
+  .ht-badge {
+    display: inline-block;
+    background: #6B1B2B;
+    color: white;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 5px 14px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .ht-title { font-size: 22px; font-weight: 700; color: var(--text); margin: 0 0 4px; }
+  .ht-meta { font-size: 13px; color: var(--text-muted); }
+
+  .ht-score-card { text-align: center; }
+  .ht-score-row { display: flex; align-items: center; justify-content: center; gap: 24px; }
+  .ht-score-team { text-align: center; }
+  .ht-score-team.right { text-align: center; }
+  .ht-team-name { font-size: 13px; color: var(--text-muted); font-weight: 600; margin-bottom: 4px; }
+  .ht-score { font-size: 36px; font-weight: 700; color: var(--text); }
+  .ht-score-divider { font-size: 28px; color: var(--text-faint); }
+
+  .ht-stats-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--surface-2);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+  .ht-stat-block { text-align: center; flex: 1; }
+  .ht-stat-val { font-size: 24px; font-weight: 700; color: var(--text); }
+  .ht-stat-val.green { color: #2d7a2d; }
+  .ht-stat-val.red { color: #e53935; }
+  .ht-stat-label { font-size: 10px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .ht-stat-divider { width: 1px; height: 36px; background: var(--divider); flex-shrink: 0; }
+
+  .ht-breakdown { border-top: 1px solid var(--divider-faint); padding-top: 10px; margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+  .ht-breakdown-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint); margin-bottom: 6px; }
+  .ht-breakdown-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--divider-faint); font-size: 13px; }
+  .ht-breakdown-row:last-child { border-bottom: none; }
+  .ht-breakdown-name { flex: 1; font-weight: 600; color: var(--text); }
+  .ht-breakdown-vals { display: flex; gap: 4px; flex-shrink: 0; }
+  .ht-opp-nums { font-size: 11px; color: var(--text-faint); flex-shrink: 0; }
+
+  .won-badge { background: rgba(45,122,45,0.12); color: #2d7a2d; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  .lost-badge { background: rgba(229,57,53,0.12); color: #e53935; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  .goal-badge { background: rgba(229,57,53,0.12); color: #e53935; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  .point-badge { background: rgba(224,160,32,0.12); color: #9a6000; font-weight: 700; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+
+  .ht-conceded-total { font-size: 14px; font-weight: 600; color: var(--text); }
+
+  .start-second-btn {
+    width: 100%;
+    padding: 16px;
+    background: #6B1B2B;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 17px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.2s;
+  }
+  .start-second-btn:hover { background: #551522; }
 </style>

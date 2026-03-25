@@ -161,6 +161,34 @@
     {/if}
   </div>
 
+  <!-- HALFTIME SHEET -->
+  <div class="card">
+    <div class="card-title">Halftime sheet</div>
+    <p class="card-sub">Choose which sections appear automatically when you tap "End 1st Half" during a match.</p>
+    <div class="ht-options">
+      <label class="ht-option">
+        <input type="checkbox" bind:checked={settings.halftimeStats.showScore} />
+        <span>Half-time score</span>
+      </label>
+      <label class="ht-option">
+        <input type="checkbox" bind:checked={settings.halftimeStats.showPuckouts} />
+        <span>Puckout stats (wins, losses, by player)</span>
+      </label>
+      <label class="ht-option">
+        <input type="checkbox" bind:checked={settings.halftimeStats.showConcededScores} />
+        <span>Scores conceded by marker</span>
+      </label>
+      <label class="ht-option">
+        <input type="checkbox" bind:checked={settings.halftimeStats.showPlayerStats} />
+        <span>Player stats</span>
+      </label>
+      <label class="ht-option">
+        <input type="checkbox" bind:checked={settings.halftimeStats.showSubs} />
+        <span>Substitutions made</span>
+      </label>
+    </div>
+  </div>
+
   <!-- APPEARANCE -->
   <div class="card">
     <div class="card-title">Appearance</div>
@@ -396,6 +424,21 @@
     display: block;
   }
   .dark-toggle.on .dark-toggle-thumb { transform: translateX(20px); }
+
+  .ht-options { display: flex; flex-direction: column; gap: 2px; }
+  .ht-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text);
+    transition: background 0.1s;
+  }
+  .ht-option:hover { background: var(--surface-2); }
+  .ht-option input[type="checkbox"] { width: 18px; height: 18px; accent-color: #6B1B2B; cursor: pointer; flex-shrink: 0; }
 
   @media (max-width: 480px) {
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
