@@ -31,6 +31,16 @@
   // ── HALFTIME ──────────────────────────────────
   let halftimeSnapshot = null
 
+  // ── PUCKOUT SECTION ───────────────────────────
+  let puckoutSection = null  // 'short'|'own-half'|'midfield'|'opp-half'|'long'
+  const puckoutSections = [
+    { key: 'short',    label: 'Short' },
+    { key: 'own-half', label: 'Own Half' },
+    { key: 'midfield', label: 'Midfield' },
+    { key: 'opp-half', label: 'Opp Half' },
+    { key: 'long',     label: 'Long' }
+  ]
+
   const defaultSquad = Array.from({ length: 20 }, (_, i) => ({
     id: i + 1,
     name: '',
@@ -48,7 +58,7 @@
       players = defaultSquad.map(p => ({ ...p }))
     }
 
-    // Check for in-progress draft
+    // Check for in-progress draft — auto-resume without asking
     const draft = await loadDraftMatch()
     if (draft && draft.opposition && !draft._saved) {
       opposition = draft.opposition
@@ -64,20 +74,28 @@
       puckouts = draft.puckouts || []
       oppScores = draft.oppScores || []
       halftimeSnapshot = draft.halftimeSnapshot || null
-      timerSeconds = draft.timerSeconds || 0
       if (draft.players?.length > 0) players = draft.players
-      screen = 'recover'
+
+      // Restore timer — if it was running when app closed, calculate real elapsed time
+      if (draft.timerStartedAt) {
+        const elapsed = Math.floor((Date.now() - draft.timerStartedAt) / 1000)
+        timerSeconds = (draft.timerSeconds || 0) + elapsed
+        timerStartedAt = Date.now()
+        timerInterval = setInterval(() => { timerSeconds++; saveDraft() }, 1000)
+        timerRunning = true
+      } else {
+        timerSeconds = draft.timerSeconds || 0
+      }
+
+      screen = draft.halftimeSnapshot && !draft.timerStartedAt ? 'match' : 'match'
     }
   })
 
-  function resumeMatch() {
-    screen = 'match'
-    timerInterval = setInterval(() => { timerSeconds++; saveDraft() }, 1000)
-    timerRunning = true
-  }
-
   async function discardDraft() {
     await clearDraftMatch()
+    clearInterval(timerInterval)
+    timerRunning = false
+    timerStartedAt = null
     opposition = ''
     venue = ''
     matchDate = new Date().toISOString().split('T')[0]
@@ -93,6 +111,11 @@
     timerSeconds = 0
     period = '1st Half'
     screen = 'setup'
+  }
+
+  async function cancelMatch() {
+    if (!confirm('Cancel this match? All stats will be lost.')) return
+    await discardDraft()
   }
 
   async function startMatch() {
@@ -223,7 +246,8 @@
         puckouts,
         oppScores,
         halftimeSnapshot,
-        timerSeconds
+        timerSeconds,
+        timerStartedAt: timerRunning ? timerStartedAt : null
       })
     } catch (e) {
       console.warn('Draft save failed:', e)
@@ -245,6 +269,9 @@
       })
       await clearDraftMatch()
       // Reset all state
+      clearInterval(timerInterval)
+      timerRunning = false
+      timerStartedAt = null
       opposition = ''
       venue = ''
       matchDate = new Date().toISOString().split('T')[0]
@@ -305,13 +332,27 @@
   let timerSeconds = 0
   let timerRunning = false
   let timerInterval = null
+  let timerStartedAt = null  // Date.now() when timer last started — survives app close
 
   function toggleTimer() {
-    if (timerRunning) { clearInterval(timerInterval); timerRunning = false }
-    else { timerInterval = setInterval(() => { timerSeconds++; saveDraft() }, 1000); timerRunning = true }
+    if (timerRunning) {
+      clearInterval(timerInterval)
+      timerRunning = false
+      timerStartedAt = null
+    } else {
+      timerStartedAt = Date.now()
+      timerInterval = setInterval(() => { timerSeconds++; saveDraft() }, 1000)
+      timerRunning = true
+    }
   }
 
-  function resetTimer() { clearInterval(timerInterval); timerRunning = false; timerSeconds = 0; saveDraft() }
+  function resetTimer() {
+    clearInterval(timerInterval)
+    timerRunning = false
+    timerStartedAt = null
+    timerSeconds = 0
+    saveDraft()
+  }
   function formatTime(s) { return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}` }
 
   // ── PUCKOUT FUNCTIONS ────────────────────────
@@ -319,6 +360,7 @@
     puckoutOutcome = null
     puckoutOurPlayer = null
     puckoutOppPlayer = ''
+    puckoutSection = null
     showPuckoutModal = true
   }
 
@@ -328,6 +370,7 @@
       outcome: puckoutOutcome,
       ourPlayer: puckoutOurPlayer,
       oppPlayer: puckoutOppPlayer.trim() || null,
+      section: puckoutSection,
       time: timerSeconds,
       period
     }]
@@ -371,6 +414,7 @@
     if (!confirm('End 1st half and view halftime stats?')) return
     clearInterval(timerInterval)
     timerRunning = false
+    timerStartedAt = null
     halftimeSnapshot = {
       score: { home: { ...matchScore.home }, away: { ...matchScore.away } },
       stats: JSON.parse(JSON.stringify(stats)),
@@ -387,6 +431,7 @@
 
   function startSecondHalf() {
     timerSeconds = 0
+    timerStartedAt = Date.now()
     timerInterval = setInterval(() => { timerSeconds++; saveDraft() }, 1000)
     timerRunning = true
     screen = 'match'
@@ -443,61 +488,6 @@
     return Object.values(map).sort((a, b) => (b.goals * 3 + b.points) - (a.goals * 3 + a.points))
   })()
 </script>
-
-{#if screen === 'recover'}
-<div class="screen">
-
-  <div class="recover-wrap">
-    <div class="recover-card">
-      <div class="recover-header">
-        <img src="doora-barefield.png" alt="Doora Barefield GAA" class="recover-logo">
-        <div class="recover-badge">Match in Progress</div>
-        <h2 class="recover-title">Resume where you left off?</h2>
-        <p class="recover-sub">The app closed during a match. Your data was saved automatically.</p>
-      </div>
-
-      <div class="recover-match-info">
-        <div class="recover-fixture">
-          <span class="recover-team">Doora Barefield</span>
-          <span class="recover-vs">vs</span>
-          <span class="recover-team">{opposition}</span>
-        </div>
-        <div class="recover-meta">
-          {matchDate}{venue ? ' · ' + venue : ''}
-        </div>
-      </div>
-
-      <div class="recover-stats-row">
-        <div class="recover-stat">
-          <div class="recover-stat-val">{formatScore(matchScore.home)}</div>
-          <div class="recover-stat-label">DB Score</div>
-        </div>
-        <div class="recover-stat-divider"></div>
-        <div class="recover-stat">
-          <div class="recover-stat-val">{formatScore(matchScore.away)}</div>
-          <div class="recover-stat-label">{opposition.slice(0,8)} Score</div>
-        </div>
-        <div class="recover-stat-divider"></div>
-        <div class="recover-stat">
-          <div class="recover-stat-val">{events.length}</div>
-          <div class="recover-stat-label">Events logged</div>
-        </div>
-        <div class="recover-stat-divider"></div>
-        <div class="recover-stat">
-          <div class="recover-stat-val">{formatTime(timerSeconds)}</div>
-          <div class="recover-stat-label">Time elapsed</div>
-        </div>
-      </div>
-
-      <div class="recover-actions">
-        <button class="recover-resume-btn" on:click={resumeMatch}>Resume Match</button>
-        <button class="recover-discard-btn" on:click={discardDraft}>Discard & Start New</button>
-      </div>
-    </div>
-  </div>
-
-</div>
-{/if}
 
 {#if screen === 'setup'}
 <div class="screen">
@@ -877,7 +867,10 @@
     <textarea bind:value={notes} placeholder="Add notes about the match..." on:input={saveDraft}></textarea>
   </div>
 
-  <button class="finish-btn" disabled={finishing} on:click={finishMatch}>{finishing ? 'Saving…' : 'End Match & Save'}</button>
+  <div class="finish-row">
+    <button class="finish-btn" disabled={finishing} on:click={finishMatch}>{finishing ? 'Saving…' : 'End Match & Save'}</button>
+    <button class="cancel-match-btn" on:click={cancelMatch}>Cancel Match</button>
+  </div>
 
   <!-- PUCKOUT MODAL -->
   {#if showPuckoutModal}
@@ -910,6 +903,19 @@
               <span class="player-name">{player.name}</span>
             </button>
           {/each}
+        </div>
+
+        <div class="modal-section-label">Where did it land? (optional)</div>
+        <div class="section-picker">
+          <div class="pitch-zones">
+            {#each puckoutSections as s}
+              <button
+                class="zone-btn"
+                class:zone-selected={puckoutSection === s.key}
+                on:click={() => puckoutSection = puckoutSection === s.key ? null : s.key}
+              >{s.label}</button>
+            {/each}
+          </div>
         </div>
 
         <div class="modal-section-label">Opposition player number (optional)</div>
@@ -1336,9 +1342,6 @@
   .notes-section { margin-top: 4px; }
   textarea { width: 100%; min-height: 80px; border: 1px solid var(--input-border); border-radius: 8px; padding: 12px 14px; font-size: 16px; font-family: inherit; color: var(--text); resize: vertical; background: var(--surface); }
   textarea:focus { outline: none; border-color: #6B1B2B; }
-  .finish-btn { width: 100%; padding: 15px; background: var(--text); color: var(--bg); border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px; font-family: inherit; }
-  .finish-btn:hover:not(:disabled) { opacity: 0.85; }
-  .finish-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   @media (max-width: 480px) {
     .match-header { flex-direction: column; align-items: flex-start; }
     .scoreboard { width: 100%; justify-content: center; }
@@ -1549,4 +1552,52 @@
     transition: background 0.2s;
   }
   .start-second-btn:hover { background: #551522; }
+
+  /* ── CANCEL MATCH + FINISH ROW ── */
+  .finish-row { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  .finish-btn { width: 100%; padding: 15px; background: var(--text); color: var(--bg); border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .finish-btn:hover:not(:disabled) { opacity: 0.85; }
+  .finish-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .cancel-match-btn {
+    width: 100%;
+    padding: 11px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-faint);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .cancel-match-btn:hover { border-color: #e53935; color: #e53935; }
+
+  /* ── PUCKOUT SECTION PICKER ── */
+  .section-picker { margin-bottom: 0.5rem; }
+  .pitch-zones {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    background: #2d7a2d;
+    border-radius: 8px;
+    padding: 6px;
+  }
+  .zone-btn {
+    padding: 10px 4px;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background: rgba(255,255,255,0.15);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: center;
+    transition: all 0.15s;
+    min-height: 44px;
+    line-height: 1.2;
+  }
+  .zone-btn:hover { background: rgba(255,255,255,0.3); }
+  .zone-btn.zone-selected { background: white; color: #2d7a2d; border-color: white; }
 </style>
