@@ -267,9 +267,22 @@ All data shown is **live current data** — not a snapshot. The panel always ref
 - [x] Quick View Stats panel — `📊 Stats` button in action bar, available at any time during the match; collapsible accordions with live data, zone heatmap, marking breakdowns, standout callouts
 - [x] Match history puckout section — shows opp player winners, marking matchups, biggest winner standouts
 - [x] Match history conceded section — split into by-marker and by-opp-player with standout callouts
+- [x] Settings rework — auto-save on every change (no Save button), per-stat tracking toggles to hide unused stats, period count management (add/remove periods beyond H1/H2)
+- [x] SVG icons — all emojis replaced with inline SVG icons throughout the entire app for consistent cross-platform rendering (no emoji font dependency)
+- [x] Landing page — separate project at `~/gaa-stats-landing/`, single HTML file with embedded CSS/JS; showcases all features with CSS-drawn mockups, animated pitch map, scroll reveals; live at https://github.com/Bressie10/gaa-stats-landing-
 
 ### Still To Build
 - [ ] PWA service worker needs CSS/JS asset URLs injected at build time (currently pre-caches fixed URLs; a proper build step would hash-bust correctly)
+
+---
+
+## Related Projects
+
+| Project | Location | GitHub |
+|---|---|---|
+| Landing page | `~/gaa-stats-landing/` | https://github.com/Bressie10/gaa-stats-landing- |
+
+---
 
 ### Key Goals
 - Works fully offline at any GAA ground — no internet required during a match
