@@ -10,6 +10,7 @@
   let players = []
   let opposition = ''
   let venue = ''
+  let competition = ''
   let matchDate = new Date().toISOString().split('T')[0]
   let nextId = 21
   let events = []
@@ -68,6 +69,7 @@
     if (draft && draft.opposition && !draft._saved) {
       opposition = draft.opposition
       venue = draft.venue || ''
+      competition = draft.competition || ''
       matchDate = draft.date
       period = draft.period || '1st Half'
       matchScore = draft.score || { home: { goals: 0, points: 0 }, away: { goals: 0, points: 0 } }
@@ -102,6 +104,7 @@
     timerStartedAt = null
     opposition = ''
     venue = ''
+    competition = ''
     matchDate = new Date().toISOString().split('T')[0]
     stats = {}
     events = []
@@ -112,7 +115,7 @@
     notes = ''
     customStats = []
     timerSeconds = 0
-    period = '1st Half'
+    period = $settingsStore.defaultPeriod || '1st Half'
     screen = 'setup'
   }
 
@@ -136,7 +139,9 @@
   }
 
   // ── STATS ────────────────────────────────────
-  const defaultStats = ['Point', 'Goal', 'Wide', 'Tackle', 'Block', 'Turnover Won', 'Turnover Lost', 'Free Won']
+  $: defaultStats = $settingsStore.defaultStats?.length
+    ? $settingsStore.defaultStats
+    : ['Point', 'Goal', 'Wide', 'Tackle', 'Block', 'Turnover Won', 'Turnover Lost', 'Free Won']
   let customStats = []
   let newCustomStat = ''
   let showAddStat = false
@@ -178,8 +183,8 @@
   }
 
   let stats = {}
-  let period = '1st Half'
-  const periods = ['Warm-up', '1st Half', '2nd Half', 'Extra Time']
+  let period = $settingsStore.defaultPeriod || '1st Half'
+  $: matchPeriods = $settingsStore.periods?.length ? $settingsStore.periods : ['Warm-up', '1st Half', '2nd Half', 'Extra Time']
   let mode = 'quick'
   let notes = ''
   let matchScore = { home: { goals: 0, points: 0 }, away: { goals: 0, points: 0 } }
@@ -194,7 +199,11 @@
     pendingLog = { playerId, stat }
     showPlayerPicker = false
     selectedStat = null
-    showPitchPicker = true
+    if ($settingsStore.trackPitchCoords) {
+      showPitchPicker = true
+    } else {
+      confirmLogWithCoords(null, null, null)
+    }
   }
 
   function confirmLogWithCoords(x, y, end) {
@@ -238,6 +247,7 @@
         date: matchDate,
         opposition,
         venue,
+        competition,
         period,
         score: matchScore,
         stats,
@@ -265,7 +275,7 @@
     timerRunning = false
     try {
       await saveMatch({
-        id: Date.now(), date: matchDate, opposition, venue,
+        id: Date.now(), date: matchDate, opposition, venue, competition,
         period, score: matchScore, stats, notes, customStats, events,
         subs_log, puckouts, oppScores,
         players: players.map(p => ({ ...p }))
@@ -277,6 +287,7 @@
       timerStartedAt = null
       opposition = ''
       venue = ''
+      competition = ''
       matchDate = new Date().toISOString().split('T')[0]
       stats = {}
       events = []
@@ -287,7 +298,7 @@
       notes = ''
       customStats = []
       timerSeconds = 0
-      period = '1st Half'
+      period = $settingsStore.defaultPeriod || '1st Half'
       screen = 'setup'
       alert('Match saved!')
     } catch (e) {
@@ -386,6 +397,18 @@
   $: puckoutTotal = puckouts.length
 
   // ── OPPOSITION SCORE FUNCTIONS ────────────────
+  function handleOppScore(type) {
+    if ($settingsStore.trackOppScores) {
+      openOppScoreModal(type)
+    } else {
+      if (type === 'point') matchScore.away.points++
+      if (type === 'goal') matchScore.away.goals++
+      matchScore = matchScore
+      saveDraft()
+      scheduleAutoSync($user?.id)
+    }
+  }
+
   function openOppScoreModal(type) {
     oppScoreType = type
     oppScorePlayerNum = ''
@@ -423,7 +446,12 @@
   }
 
   // ── QUICK VIEW STATS — all use live data ──────
-  let openSections = { puckouts: true, conceded: true, players: false, subs: false }
+  let openSections = {
+    puckouts: $settingsStore.quickViewSections?.puckouts ?? true,
+    conceded: $settingsStore.quickViewSections?.conceded ?? true,
+    players: $settingsStore.quickViewSections?.players ?? false,
+    subs: $settingsStore.quickViewSections?.subs ?? false,
+  }
   function toggleSection(k) { openSections[k] = !openSections[k]; openSections = openSections }
 
   let htPuckoutZoneFilter = null
@@ -538,10 +566,18 @@
       <input bind:value={opposition} placeholder="e.g. Éire Óg" />
     </div>
     <div class="field-row">
+      {#if $settingsStore.showVenueField}
       <div class="field-group">
         <label>Venue</label>
         <input bind:value={venue} placeholder="e.g. Cusack Park" />
       </div>
+      {/if}
+      {#if $settingsStore.showCompetitionField}
+      <div class="field-group">
+        <label>Competition</label>
+        <input bind:value={competition} placeholder="e.g. County Championship" />
+      </div>
+      {/if}
       <div class="field-group">
         <label>Date</label>
         <input type="date" bind:value={matchDate} />
@@ -587,7 +623,7 @@
   <div class="match-header">
     <div class="match-info">
       <div class="match-title">DB <span class="vs">vs</span> {opposition}</div>
-      <div class="match-meta">{venue}{venue ? ' · ' : ''}{matchDate}</div>
+      <div class="match-meta">{[competition, venue, matchDate].filter(Boolean).join(' · ')}</div>
     </div>
     <div class="scoreboard">
       <div class="score-block">
@@ -600,9 +636,9 @@
         <div class="score-val">{formatScore(matchScore.away)}</div>
         <div class="opp-btns">
           <button class="opp-btn" on:click={() => { if(matchScore.away.points>0) matchScore.away.points--; matchScore=matchScore; saveDraft() }}>−P</button>
-          <button class="opp-btn opp-btn-score" on:click={() => openOppScoreModal('point')}>+P</button>
+          <button class="opp-btn opp-btn-score" on:click={() => handleOppScore('point')}>+P</button>
           <button class="opp-btn" on:click={() => { if(matchScore.away.goals>0) matchScore.away.goals--; matchScore=matchScore; saveDraft() }}>−G</button>
-          <button class="opp-btn opp-btn-score" on:click={() => openOppScoreModal('goal')}>+G</button>
+          <button class="opp-btn opp-btn-score" on:click={() => handleOppScore('goal')}>+G</button>
         </div>
       </div>
     </div>
@@ -623,7 +659,7 @@
       </div>
     </div>
     <div class="period-pills">
-      {#each periods as p}
+      {#each matchPeriods as p}
         <button
           class="period-btn"
           class:active={period === p}
@@ -639,7 +675,7 @@
       <button class:active={mode === 'player'} on:click={() => mode = 'player'}>Player rows</button>
     </div>
     <div class="action-btns">
-      <button class="puckout-btn" on:click={openPuckoutModal}>+ Puckout</button>
+      {#if $settingsStore.trackPuckouts}<button class="puckout-btn" on:click={openPuckoutModal}>+ Puckout</button>{/if}
       <button class="sub-btn" on:click={openSubModal}>
         <svg style="width:15px;height:15px;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg> Sub
       </button>
@@ -649,7 +685,7 @@
     </div>
   </div>
 
-  {#if puckoutTotal > 0}
+  {#if $settingsStore.trackPuckouts && puckoutTotal > 0}
     <div class="puckout-summary-bar">
       <span class="puckout-summary-label">Puckouts</span>
       <span class="puckout-won">{puckoutWins} Won</span>
@@ -1069,11 +1105,11 @@
         <div class="ht-score-bar-val">{formatScore(matchScore.away)}</div>
       </div>
     </div>
-    <div class="ht-score-bar-meta">{matchDate}{venue ? ' · ' + venue : ''}</div>
+    <div class="ht-score-bar-meta">{[competition, venue, matchDate].filter(Boolean).join(' · ')}</div>
   </div>
 
   <!-- ── PUCKOUTS accordion ── -->
-  {#if puckouts.length > 0}
+  {#if $settingsStore.trackPuckouts && puckouts.length > 0}
     {@const htWins = puckouts.filter(p => p.outcome === 'won').length}
     {@const htTotal = puckouts.length}
     {@const htLosses = htTotal - htWins}
@@ -1228,7 +1264,7 @@
   {/if}
 
   <!-- ── SCORES CONCEDED accordion ── -->
-  {#if oppScores.length > 0}
+  {#if $settingsStore.trackOppScores && oppScores.length > 0}
     {@const htGoals = oppScores.filter(s => s.type === 'goal').length}
     {@const htPoints = oppScores.filter(s => s.type === 'point').length}
     <div class="accordion-card">
