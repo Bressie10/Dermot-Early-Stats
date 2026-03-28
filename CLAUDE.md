@@ -15,7 +15,7 @@ grounds with no internet.
 
 | Layer | Technology |
 |---|---|
-| Framework | Svelte + Vite |
+| Framework | Svelte 5 + Vite |
 | Language | JavaScript (no TypeScript) |
 | Local storage | IndexedDB via `idb` library |
 | Cloud sync | Supabase (PostgreSQL + Auth) |
@@ -23,6 +23,8 @@ grounds with no internet.
 | Styling | Scoped CSS inside Svelte components |
 | PWA | Service worker (`sw.js` + `manifest.json`) |
 | Package manager | npm |
+
+**Svelte version note:** The app runs Svelte 5 but uses the legacy API (`let`, `$:`, `on:click`, etc.) throughout — not runes (`$state`, `$derived`, `$effect`). Do not mix rune syntax into existing components.
 
 ---
 
@@ -48,10 +50,10 @@ hurling-stats/
 │   │   ├── TeamStats.svelte          # Team stats + pitch map
 │   │   ├── History.svelte            # Previous matches archive
 │   │   ├── Timeline.svelte           # Chronological match event feed
-│   │   ├── Squad.svelte              # Squad management
+│   │   ├── Squad.svelte              # Squad management — list view + pitch view
 │   │   ├── StatTargets.svelte        # Team performance targets
 │   │   └── Settings.svelte           # App settings + data export
-│   ├── app.css                       # Global reset + base styles
+│   ├── app.css                       # Global reset + CSS custom properties (light theme)
 │   ├── App.svelte                    # Root component — nav + routing + auth gate
 │   └── main.js                       # Vite entry point
 ├── index.html                        # HTML shell — viewport meta tag is here
@@ -131,6 +133,11 @@ No router library. `App.svelte` uses a single `activePage` string variable and `
 - Shared global state: Svelte `writable` stores (`auth-store.js`, `settings-store.js`)
 - Persistent state: IndexedDB via `db.js`
 
+### Svelte 5 legacy reactivity gotcha
+The app runs Svelte 5 in legacy mode. **Template function calls do not track reactive dependencies** the way `$:` declarations do. If a function reads a reactive variable (like `players`) and is called from a template expression or `{@const}`, the template will NOT re-render when that variable changes.
+
+**Rule:** Any derived value that drives the template display must be a `$:` reactive declaration, not a plain function called inline. For example, `Squad.svelte` uses `$: slotMap = ...` (not `getPlayerForSlot()` in the template) so pitch slots update when players are assigned.
+
 ### Player identity
 Players are identified by **name**, not jersey number. Numbers change week to week. The `getPlayerIdInMatch()` function in `PlayerStats.svelte` looks up a player's ID within a specific match by matching on name. Always use name as the stable identifier.
 
@@ -168,19 +175,23 @@ Each logged opposition score produces an object:
 ### Puckout zone keys
 Zone keys follow the format `'<col>-<row>'`, e.g. `'midfield-top'`. Columns: `short`, `own-half`, `midfield`, `opp-half`, `long`. Rows: `top`, `bottom`. Use `formatZoneLabel(key)` to produce a display string.
 
-### Colours
-- Primary maroon: `#6B1B2B`
-- Hover/dark maroon: `#551522`
-- Success green: `#2d7a2d`
-- Pitch green: `#2d7a2d`
-- All component styles are scoped — no global CSS classes except reset in `app.css`
-
-### Dark mode
-CSS custom properties defined in `app.css` under `:root` (light) and `[data-theme="dark"]`. Never hardcode `white`, `#f8f8f8`, `#1a1a1a`, `#555`, `#888`, `#aaa` in component styles — use the variables instead:
+### Theming / Colours
+All brand colours are CSS custom properties — never hardcode them:
+- `var(--primary)` — club primary colour (default lime green `#5A8A00`; overridable per-club in Settings)
+- `var(--primary-hover)` — darkened primary for hover states
+- `var(--primary-rgb)` — RGB triplet for use in `rgba(var(--primary-rgb), 0.1)` alpha variants
+- `var(--primary-text)` — contrasting text colour on primary backgrounds (white or dark, auto-computed)
 - Backgrounds: `var(--bg)`, `var(--surface)`, `var(--surface-2)`, `var(--surface-3)`
 - Borders: `var(--border)`, `var(--input-border)`, `var(--divider)`, `var(--divider-faint)`
 - Text: `var(--text)`, `var(--text-2)`, `var(--text-muted)`, `var(--text-faint)`
-- Brand maroon `#6B1B2B` and semantic colours (green/red) are kept as hex — they don't change between themes
+- Semantic colours (success green `#2d7a2d`, error red `#e53935`) and pitch green (`#1e6b1e`, `#2d7a2d`) are kept as hex — they are not brand colours and don't change
+
+`App.svelte` applies the club's custom colour at runtime via `document.documentElement.style.setProperty('--primary', ...)` and also keeps `document.title` and `apple-mobile-web-app-title` in sync with `settingsStore.teamName`.
+
+Dark mode has been **removed** — the app is light-only. Do not add `[data-theme="dark"]` back.
+
+### Club colour presets (Settings.svelte)
+8 GAA county presets are defined in `PRESET_COLORS`. Coaches can also pick a fully custom colour via a native `<input type="color">`. The selected colour is stored in `settingsStore.clubPrimaryColor` (a hex string or `null` for the default).
 
 ### Auto-save (draft)
 `saveDraft()` is called on every stat tap, sub, score change, puckout log, and timer tick. It writes the full match state to IndexedDB as `id: 'draft'`. IndexedDB persists across tab/browser close, reload, navigation, and offline — data is only cleared by explicit user action.
@@ -197,9 +208,48 @@ All logo references use the public-folder relative path `doora-barefield.png` (n
 
 ---
 
+## Squad Page (Squad.svelte)
+
+Two views toggled by a pill toggle in the header: **List** and **Pitch**.
+
+### List view
+Standard editable table of all squad players (name, jersey number, position dropdown). Starters and Subs shown in separate sections. "Add Player" dashed button at the bottom. Full-width Save button.
+
+### Pitch view
+Visual GAA pitch with 15 position slots laid out in the correct formation:
+
+```
+PITCH_ROWS = [[13,14,15],[10,11,12],[8,9],[5,6,7],[2,3,4],[1]]
+```
+
+A player "occupies a slot" if and only if `number >= 1 && number <= 15 && position !== 'Sub'`. This is the canonical check used everywhere — `isInPitchSlot(p)`.
+
+**Reactive slot map:** The pitch display is driven by `$: slotMap` (a plain object keyed by slot number → player). This MUST remain a `$:` declaration. Using a function call in the template would break reactivity in Svelte 5 legacy mode and the pitch would not update after assignments.
+
+**Assigning a player to a slot:**
+- Tap any slot → bottom-sheet modal opens
+- Modal lists all named players; players already in slots are tagged with their current position
+- Selecting a player runs `assignPlayerToSlot(playerId)`:
+  - If the slot already has a player, the displaced player is swapped to the incoming player's old position/number (or made a Sub if incoming was a Sub)
+  - `nextAvailableNumber()` is used wherever a free jersey number is needed — it finds the lowest positive integer not already in use
+
+**Adding players from pitch view:**
+- Each slot modal has a "New player" row at the bottom → expands inline to a name input → "Add & assign" creates and places in one step
+- The subs panel has an "Add player to squad" button → opens the new-player form as a Sub
+- Sub chips have a × remove button
+
+**Number management:**
+- Always use `nextAvailableNumber()` when assigning a free number — never `players.length + 1` (breaks after deletions)
+- Jersey numbers 1–15 are "pitch slots"; anything higher is treated as a Sub regardless of `position` field
+
+### Lineup saved with matches
+`Match.svelte` silently auto-populates a `lineup` object (slot number → player ID) from squad jersey numbers when a match starts. This is saved with the match and used by `History.svelte` for the PDF export. There is no interactive lineup builder on the Match setup screen — it lives entirely on the Squad page.
+
+---
+
 ## Quick View Stats (Match.svelte)
 
-Accessed via the **📊 Stats** button in the match action bar at any time during the match. Sets `screen = 'stats'`. The timer keeps running — nothing is paused or frozen.
+Accessed via the Stats button in the match action bar at any time during the match. Sets `screen = 'stats'`. The timer keeps running — nothing is paused or frozen.
 
 The stats panel is a series of **collapsible accordions** (`openSections` object, toggled via `toggleSection(k)`):
 
@@ -234,6 +284,9 @@ All data shown is **live current data** — not a snapshot. The panel always ref
 - **`timerStartedAt` wall-clock pattern** — do not revert to a pure counter; the wall-clock approach is what keeps the timer accurate after app close
 - **Logo path `doora-barefield.png`** — always use this public-folder path, never `/src/assets/doora-barefield.png`
 - **`ourPlayer` + `oppPlayer` on puckouts** — both fields are needed for the marking matchup breakdown; do not remove either
+- **`$: slotMap` in Squad.svelte** — must stay a reactive declaration; converting to a plain function call in the template breaks pitch view updates in Svelte 5
+- **`nextAvailableNumber()` for free jersey numbers** — never use `players.length + 1`; it produces duplicates after deletions
+- **CSS custom properties for all colours** — never hardcode `#6B1B2B` or any primary colour hex; use `var(--primary)` and `rgba(var(--primary-rgb), ...)` so club colour overrides apply everywhere
 
 ---
 
@@ -258,17 +311,21 @@ All data shown is **live current data** — not a snapshot. The panel always ref
 - [x] Logo path standardised — all references use `doora-barefield.png` (public folder)
 - [x] PWA offline install — `manifest.json` + `sw.js` (cache-first for assets, network-first for Supabase), registered in `index.html`
 - [x] PDF match report export — `window.print()` + `@media print` CSS in `History.svelte`
-- [x] Dark mode — CSS custom properties, toggle in Settings, applied via `data-theme` in `App.svelte`
 - [x] Auto-sync to Supabase — `scheduleAutoSync()` debounced 10s; NOT called on timer ticks
 - [x] Puckout tracking — log every puckout as won/lost, our player, opp player number, zone
 - [x] Puckout zone picker — 10-zone SVG pitch map (5 cols × 2 rows) in the log modal
 - [x] Opposition player tracking on lost puckouts — records which opp player won it and who was marking; shown as matchup lines in stats
 - [x] Cancel match button — confirms then discards draft and returns to setup
-- [x] Quick View Stats panel — `📊 Stats` button in action bar, available at any time during the match; collapsible accordions with live data, zone heatmap, marking breakdowns, standout callouts
+- [x] Quick View Stats panel — Stats button in action bar, available at any time during the match; collapsible accordions with live data, zone heatmap, marking breakdowns, standout callouts
 - [x] Match history puckout section — shows opp player winners, marking matchups, biggest winner standouts
 - [x] Match history conceded section — split into by-marker and by-opp-player with standout callouts
 - [x] Settings rework — auto-save on every change (no Save button), per-stat tracking toggles to hide unused stats, period count management (add/remove periods beyond H1/H2)
 - [x] SVG icons — all emojis replaced with inline SVG icons throughout the entire app for consistent cross-platform rendering (no emoji font dependency)
+- [x] Club colour picker — Settings has 8 GAA county presets + custom colour input; primary colour applied globally via CSS custom properties at runtime
+- [x] Dynamic team name — `document.title` and nav brand name reflect `settingsStore.teamName`; scoreboard labels and match setup hero also use it
+- [x] Dark mode removed — app is light-only; `[data-theme="dark"]` block removed from `app.css`
+- [x] Squad pitch view — List/Pitch toggle on Squad page; visual GAA formation with 15 slots; tap to assign players, inline new-player form, removable sub chips, reactive `$: slotMap` driving display
+- [x] Lineup auto-populated on match start — `Match.svelte` builds `lineup` from squad jersey numbers silently; saved with match for PDF export; no interactive builder on setup screen
 - [x] Landing page — separate project at `~/gaa-stats-landing/`, single HTML file with embedded CSS/JS; showcases all features with CSS-drawn mockups, animated pitch map, scroll reveals; live at https://github.com/Bressie10/gaa-stats-landing-
 
 ### Still To Build

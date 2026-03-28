@@ -112,6 +112,8 @@
       const s = m.stats?.[id] || {}
       return (s['Point'] || 0) + (s['Goal'] || 0) * 3
     })
+    const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#5A8A00'
+    const primaryRgb = getComputedStyle(document.documentElement).getPropertyValue('--primary-rgb').trim() || '90, 138, 0'
     chartInstance = new Chart(canvas, {
       type: 'line',
       data: {
@@ -119,10 +121,10 @@
         datasets: [{
           label: 'Score contribution',
           data: points,
-          borderColor: '#6B1B2B',
-          backgroundColor: 'rgba(107,27,43,0.08)',
+          borderColor: primaryColor,
+          backgroundColor: `rgba(${primaryRgb}, 0.08)`,
           borderWidth: 2,
-          pointBackgroundColor: '#6B1B2B',
+          pointBackgroundColor: primaryColor,
           pointRadius: 5,
           tension: 0.3,
           fill: true
@@ -400,7 +402,7 @@
     width: 100%;
     min-height: 46px;
   }
-  .field-group select:focus { outline: none; border-color: #6B1B2B; }
+  .field-group select:focus { outline: none; border-color: var(--primary); }
 
   .compare-btn {
     display: inline-flex;
@@ -409,9 +411,9 @@
     gap: 6px;
     padding: 12px 16px;
     border-radius: 10px;
-    border: 1.5px solid #6B1B2B;
+    border: 1.5px solid var(--primary);
     background: none;
-    color: #6B1B2B;
+    color: var(--primary);
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
@@ -420,7 +422,7 @@
     transition: all 0.15s;
     min-height: 46px;
   }
-  .compare-btn.active { background: #6B1B2B; color: white; }
+  .compare-btn.active { background: var(--primary); color: white; }
 
   .empty-state { text-align: center; padding: 3rem 1rem; }
   .empty-icon { width: 48px; height: 48px; margin: 0 auto 1rem; color: var(--text-faint); }
@@ -431,7 +433,7 @@
   .profile-card { display: flex; align-items: center; gap: 1rem; }
   .profile-avatar {
     width: 52px; height: 52px; border-radius: 50%;
-    background: #6B1B2B; color: white;
+    background: var(--primary); color: white;
     display: flex; align-items: center; justify-content: center;
     font-size: 22px; font-weight: 700; flex-shrink: 0;
   }
@@ -472,13 +474,13 @@
   .stat-row:last-child { border-bottom: none; }
   .stat-label { font-size: 13px; color: var(--text-2); min-width: 130px; }
   .stat-bar-wrap { flex: 1; height: 6px; background: var(--divider); border-radius: 3px; overflow: hidden; }
-  .stat-bar { height: 100%; background: #6B1B2B; border-radius: 3px; transition: width 0.4s ease; }
+  .stat-bar { height: 100%; background: var(--primary); border-radius: 3px; transition: width 0.4s ease; }
   .stat-val { font-size: 13px; font-weight: 700; color: var(--text); min-width: 24px; text-align: right; }
 
   .compare-selects { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; margin-top: 8px; }
   .compare-vs { font-size: 13px; color: var(--text-faint); text-align: center; font-weight: 600; }
   .compare-header { display: grid; grid-template-columns: 1fr 1fr 1fr; text-align: center; padding: 8px 0; border-bottom: 1px solid var(--divider); margin-bottom: 4px; }
-  .compare-match-label { font-size: 12px; font-weight: 700; color: #6B1B2B; }
+  .compare-match-label { font-size: 12px; font-weight: 700; color: var(--primary); }
   .compare-stat-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
   .compare-row { display: grid; grid-template-columns: 1fr 1fr 1fr; text-align: center; padding: 7px 0; border-bottom: 1px solid var(--divider-faint); align-items: center; }
   .compare-row:last-child { border-bottom: none; }

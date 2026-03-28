@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { getDB, loadMatches } from './db.js'
   import { settingsStore } from './settings-store.js'
+  import { user } from './auth-store.js'
 
   let settings = { ...$settingsStore, quickViewSections: { ...$settingsStore.quickViewSections } }
   let savedFlash = false
@@ -9,6 +10,17 @@
   let exportSuccess = false
   let newCustomStat = ''
   let newPeriod = ''
+
+  const PRESET_COLORS = [
+    { label: 'Lime (Default)', color: '#5A8A00' },
+    { label: 'Maroon', color: '#6B1B2B' },
+    { label: 'Dublin Blue', color: '#003DA5' },
+    { label: 'Limerick Green', color: '#007A33' },
+    { label: 'Cork Red', color: '#C8102E' },
+    { label: 'Galway Maroon', color: '#7B1E3A' },
+    { label: 'Tipperary Navy', color: '#1B2A6B' },
+    { label: 'Antrim Saffron', color: '#B89300' },
+  ]
 
   const PRESET_PERIODS = ['Warm-up', '1st Half', '2nd Half', 'Extra Time']
   const REQUIRED_PERIODS = ['1st Half', '2nd Half']
@@ -86,6 +98,34 @@
   }
 
   $: customPeriods = settings.periods.filter(p => !PRESET_PERIODS.includes(p))
+
+  // ── Club colours ──
+  let customColorInput = settings.clubPrimaryColor || ''
+
+  function getContrastPreview(hex) {
+    if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return '#ffffff'
+    const r = parseInt(hex.slice(1,3), 16)
+    const g = parseInt(hex.slice(3,5), 16)
+    const b = parseInt(hex.slice(5,7), 16)
+    return (0.299*r + 0.587*g + 0.114*b) / 255 > 0.5 ? '#1A2015' : '#ffffff'
+  }
+
+  function handleCustomColor(e) {
+    settings.clubPrimaryColor = e.target.value
+    customColorInput = e.target.value
+    autoSave()
+  }
+
+  function handleCustomColorText(e) {
+    const val = e.target.value
+    if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+      settings.clubPrimaryColor = val
+      autoSave()
+    } else if (!val) {
+      settings.clubPrimaryColor = null
+      autoSave()
+    }
+  }
 
   // ── Data export ──
   async function exportData() {
@@ -387,22 +427,67 @@
     </div>
   </div>
 
-  <!-- ── APPEARANCE ── -->
+  <!-- ── CLUB COLOURS ── -->
   <div class="section-block">
-    <div class="section-title">Appearance</div>
+    <div class="section-title">Club Colours</div>
     <div class="card">
-      <div class="toggle-row">
-        <div class="toggle-info">
-          <div class="toggle-label">Dark mode</div>
-          <div class="toggle-sub">Easier on the eyes in low light conditions</div>
-        </div>
-        <button
-          class="toggle-switch"
-          class:on={settings.darkMode}
-          on:click={() => { settings.darkMode = !settings.darkMode; autoSave() }}
-          aria-label="Toggle dark mode"
-        ><span class="toggle-thumb"></span></button>
+      <div class="card-desc">Set your club's primary colour. This changes buttons, active states, and highlights throughout the app.</div>
+
+      <div class="color-presets">
+        {#each PRESET_COLORS as preset}
+          <button
+            class="color-swatch"
+            class:selected={settings.clubPrimaryColor === preset.color}
+            style="--swatch-color: {preset.color}"
+            on:click={() => {
+              settings.clubPrimaryColor = settings.clubPrimaryColor === preset.color ? null : preset.color
+              autoSave()
+            }}
+            title={preset.label}
+          >
+            {#if preset.label.includes('Default')}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:12px;height:12px;opacity:0.7"><polyline points="20 6 9 17 4 12"/></svg>
+            {/if}
+          </button>
+        {/each}
       </div>
+
+      <div class="color-custom-row">
+        <div class="field-group" style="flex:1">
+          <label>Custom colour</label>
+          <div class="color-input-wrap">
+            <input
+              type="color"
+              bind:value={customColorInput}
+              on:input={handleCustomColor}
+              class="color-picker"
+            />
+            <input
+              type="text"
+              bind:value={customColorInput}
+              on:input={handleCustomColorText}
+              placeholder="#BAFF29"
+              class="color-text-input"
+              maxlength="7"
+            />
+          </div>
+        </div>
+        {#if settings.clubPrimaryColor}
+          <button class="reset-color-btn" on:click={() => { settings.clubPrimaryColor = null; customColorInput = ''; autoSave() }}>
+            Reset to default
+          </button>
+        {/if}
+      </div>
+
+      {#if settings.clubPrimaryColor}
+        <div class="color-preview">
+          <span class="color-preview-label">Preview</span>
+          <div class="color-preview-row">
+            <button class="preview-btn" style="background: {settings.clubPrimaryColor}; color: {getContrastPreview(settings.clubPrimaryColor)}">Primary button</button>
+            <div class="preview-badge" style="background: rgba(var(--primary-rgb), 0.12); border: 1px solid rgba(var(--primary-rgb), 0.25); color: var(--primary)">Active state</div>
+          </div>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -428,20 +513,20 @@
     <div class="section-title">About</div>
     <div class="card about-card">
       <div class="about-row">
-        <span class="about-label">App</span>
-        <span class="about-val">Doora Barefield Stats</span>
+        <span class="about-label">Team</span>
+        <span class="about-val">{settings.teamName || 'GAA Stats'}</span>
+      </div>
+      <div class="about-row">
+        <span class="about-label">Signed in as</span>
+        <span class="about-val">{$user?.email || '—'}</span>
       </div>
       <div class="about-row">
         <span class="about-label">Version</span>
         <span class="about-val">1.0.0</span>
       </div>
       <div class="about-row">
-        <span class="about-label">Built for</span>
-        <span class="about-val">Doora Barefield GAA</span>
-      </div>
-      <div class="about-row">
         <span class="about-label">Storage</span>
-        <span class="about-val">Local (IndexedDB) + Supabase</span>
+        <span class="about-val">Device + Supabase cloud</span>
       </div>
     </div>
   </div>
@@ -519,9 +604,9 @@
   }
   .field-group input:focus, .field-group select:focus {
     outline: none;
-    border-color: #6B1B2B;
+    border-color: var(--primary);
     background: var(--surface);
-    box-shadow: 0 0 0 3px rgba(107,27,43,0.08);
+    box-shadow: 0 0 0 3px rgba(var(--primary-rgb),0.08);
   }
   .field-hint { font-size: 12px; color: var(--text-faint); line-height: 1.4; }
 
@@ -544,7 +629,7 @@
     border: none; background: var(--divider); cursor: pointer; transition: background 0.2s;
     flex-shrink: 0; padding: 0;
   }
-  .toggle-switch.on { background: #6B1B2B; }
+  .toggle-switch.on { background: var(--primary); }
   .toggle-thumb {
     position: absolute; top: 3px; left: 3px;
     width: 22px; height: 22px; border-radius: 50%;
@@ -563,14 +648,14 @@
     color: var(--text-muted); cursor: pointer; font-family: inherit;
     transition: all 0.15s; text-align: left; min-height: 44px;
   }
-  .stat-toggle.active { border-color: #6B1B2B; color: var(--text); background: rgba(107,27,43,0.08); }
+  .stat-toggle.active { border-color: var(--primary); color: var(--text); background: rgba(var(--primary-rgb),0.08); }
   .toggle-check {
     width: 18px; height: 18px; border-radius: 4px;
     border: 1.5px solid var(--input-border); background: var(--surface);
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0; color: white;
   }
-  .stat-toggle.active .toggle-check { background: #6B1B2B; border-color: #6B1B2B; }
+  .stat-toggle.active .toggle-check { background: var(--primary); border-color: var(--primary); }
   .toggle-check svg { width: 11px; height: 11px; }
 
   /* Add stat / add period row */
@@ -582,11 +667,11 @@
     background: var(--surface-3); color: var(--text); min-height: 44px;
   }
   .add-stat-row input:focus, .add-period-row input:focus {
-    outline: none; border-color: #6B1B2B; background: var(--surface);
+    outline: none; border-color: var(--primary); background: var(--surface);
   }
   .add-small-btn {
     padding: 11px 16px; border-radius: 8px; border: none;
-    background: #6B1B2B; color: white; font-size: 14px; font-weight: 600;
+    background: var(--primary); color: white; font-size: 14px; font-weight: 600;
     cursor: pointer; font-family: inherit; min-height: 44px; white-space: nowrap;
   }
 
@@ -609,7 +694,7 @@
     display: flex; align-items: center; justify-content: center;
     cursor: pointer; flex-shrink: 0; color: white; transition: all 0.15s;
   }
-  .period-check.checked { background: #6B1B2B; border-color: #6B1B2B; }
+  .period-check.checked { background: var(--primary); border-color: var(--primary); }
   .period-check.locked { opacity: 0.5; cursor: not-allowed; }
   .period-name { font-size: 14px; color: var(--text); flex: 1; }
   .required-tag { font-size: 11px; color: var(--text-faint); background: var(--surface-2); padding: 2px 7px; border-radius: 4px; }
@@ -621,18 +706,18 @@
 
   /* Period length slider */
   .period-row { display: flex; align-items: center; gap: 12px; }
-  .period-row input[type="range"] { flex: 1; accent-color: #6B1B2B; }
-  .period-val { font-size: 15px; font-weight: 700; color: #6B1B2B; min-width: 56px; }
+  .period-row input[type="range"] { flex: 1; accent-color: var(--primary); }
+  .period-val { font-size: 15px; font-weight: 700; color: var(--primary); min-width: 56px; }
 
   /* Export button */
   .export-btn {
     display: inline-flex; align-items: center; gap: 8px;
     padding: 11px 18px; border-radius: 10px;
-    border: 1.5px solid #6B1B2B; background: none;
-    color: #6B1B2B; font-size: 14px; font-weight: 600;
+    border: 1.5px solid var(--primary); background: none;
+    color: var(--primary); font-size: 14px; font-weight: 600;
     cursor: pointer; font-family: inherit; transition: all 0.15s; width: fit-content;
   }
-  .export-btn:hover { background: #6B1B2B; color: white; }
+  .export-btn:hover { background: var(--primary); color: white; }
   .export-btn.success { background: #e6f4ea; border-color: #2d7a2d; color: #2d7a2d; }
 
   /* About */
@@ -648,5 +733,47 @@
   @media (max-width: 480px) {
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
     .page-header { flex-wrap: wrap; }
+  }
+
+  /* Club colours */
+  .color-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+  .color-swatch {
+    width: 36px; height: 36px; border-radius: 50%; border: 2.5px solid transparent;
+    background: var(--swatch-color); cursor: pointer; transition: all 0.15s;
+    display: flex; align-items: center; justify-content: center; color: transparent;
+    flex-shrink: 0;
+  }
+  .color-swatch:hover { transform: scale(1.1); border-color: var(--border); }
+  .color-swatch.selected { border-color: var(--text); transform: scale(1.1); color: inherit; }
+
+  .color-custom-row { display: flex; align-items: flex-end; gap: 12px; }
+  .color-input-wrap { display: flex; align-items: center; gap: 8px; }
+  .color-picker {
+    width: 46px; height: 46px; border-radius: 10px; border: 1.5px solid var(--input-border);
+    padding: 2px; cursor: pointer; background: var(--surface-3);
+  }
+  .color-text-input {
+    flex: 1; padding: 13px 14px; border: 1.5px solid var(--input-border); border-radius: 10px;
+    font-size: 14px; font-family: monospace; background: var(--surface-3); color: var(--text);
+    min-height: 46px;
+  }
+  .color-text-input:focus { outline: none; border-color: var(--primary); background: var(--surface); }
+  .reset-color-btn {
+    padding: 11px 14px; border-radius: 10px; border: 1.5px solid var(--border);
+    background: none; color: var(--text-muted); font-size: 13px; font-weight: 500;
+    cursor: pointer; font-family: inherit; white-space: nowrap; min-height: 46px;
+    transition: all 0.15s; align-self: flex-end;
+  }
+  .reset-color-btn:hover { border-color: var(--text-muted); color: var(--text); }
+
+  .color-preview { background: var(--surface-2); border-radius: 10px; padding: 12px 14px; }
+  .color-preview-label { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); display: block; margin-bottom: 10px; }
+  .color-preview-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .preview-btn {
+    padding: 9px 18px; border-radius: 8px; border: none; font-size: 13px; font-weight: 600;
+    cursor: default; font-family: inherit;
+  }
+  .preview-badge {
+    padding: 6px 12px; border-radius: 6px; font-size: 13px; font-weight: 600;
   }
 </style>

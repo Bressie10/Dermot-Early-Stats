@@ -104,22 +104,32 @@
     align-items: center;
     justify-content: center;
     background: var(--bg);
+    background-image:
+      radial-gradient(ellipse 70% 50% at 50% 0%, rgba(var(--primary-rgb), 0.08) 0%, transparent 70%);
     padding: 1rem;
   }
   .auth-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: 20px;
     padding: 2rem;
     width: 100%;
     max-width: 380px;
     display: flex;
     flex-direction: column;
     gap: 16px;
+    box-shadow: 0 8px 40px rgba(26,32,21,0.10), 0 2px 8px rgba(26,32,21,0.06);
   }
-  .auth-header { text-align: center; }
-  .auth-logo { width: 64px; height: 64px; object-fit: contain; margin-bottom: 12px; }
-  .auth-header h1 { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .auth-header { text-align: center; padding-bottom: 4px; }
+  .auth-logo {
+    width: 72px;
+    height: 72px;
+    object-fit: contain;
+    margin-bottom: 14px;
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(var(--primary-rgb), 0.2);
+  }
+  .auth-header h1 { font-size: 21px; font-weight: 700; color: var(--text); margin-bottom: 4px; letter-spacing: -0.02em; }
   .auth-header p { font-size: 13px; color: var(--text-muted); }
 
   .mode-toggle {
@@ -141,7 +151,7 @@
     min-height: 44px;
   }
   .mode-toggle button.active {
-    background: #6B1B2B;
+    background: var(--primary);
     color: white;
     font-weight: 600;
   }
@@ -159,9 +169,9 @@
   }
   .field-group input:focus {
     outline: none;
-    border-color: #6B1B2B;
+    border-color: var(--primary);
     background: var(--surface);
-    box-shadow: 0 0 0 3px rgba(107,27,43,0.08);
+    box-shadow: 0 0 0 3px rgba(var(--primary-rgb),0.08);
   }
 
   .error-msg {
@@ -181,7 +191,7 @@
   .submit-btn {
     width: 100%;
     padding: 15px;
-    background: #6B1B2B;
+    background: var(--primary);
     color: white;
     border: none;
     border-radius: 10px;
@@ -192,7 +202,7 @@
     transition: background 0.15s;
     min-height: 50px;
   }
-  .submit-btn:hover { background: #551522; }
+  .submit-btn:hover { background: var(--primary-hover); }
   .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
   .auth-hint {
@@ -203,7 +213,7 @@
   .link-btn {
     background: none;
     border: none;
-    color: #6B1B2B;
+    color: var(--primary);
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;

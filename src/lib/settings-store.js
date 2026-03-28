@@ -33,7 +33,7 @@ const defaults = {
   },
 
   // Appearance
-  darkMode: false,
+  clubPrimaryColor: null,
 
   // Legacy: halftime sheet section visibility (kept for compatibility)
   halftimeStats: {
@@ -46,8 +46,18 @@ const defaults = {
 }
 
 function createSettingsStore() {
-  const stored = localStorage.getItem(SETTINGS_KEY)
-  const parsed = stored ? JSON.parse(stored) : {}
+  // FIX: Wrap JSON.parse in try-catch. If localStorage is corrupted (partial
+  // write, storage-full abort, etc.) JSON.parse throws and the entire app
+  // crashes on load. Fall back to defaults instead.
+  let parsed = {}
+  try {
+    const stored = localStorage.getItem(SETTINGS_KEY)
+    if (stored) parsed = JSON.parse(stored)
+  } catch (e) {
+    console.warn('Settings corrupted — resetting to defaults:', e)
+    try { localStorage.removeItem(SETTINGS_KEY) } catch (_) {}
+  }
+
   const initial = {
     ...defaults,
     ...parsed,
@@ -56,6 +66,7 @@ function createSettingsStore() {
     // Ensure arrays have fallbacks
     periods: parsed.periods?.length ? parsed.periods : defaults.periods,
     defaultStats: parsed.defaultStats?.length ? parsed.defaultStats : defaults.defaultStats,
+    clubPrimaryColor: parsed.clubPrimaryColor ?? defaults.clubPrimaryColor,
   }
 
   const { subscribe, set, update } = writable(initial)
@@ -63,7 +74,12 @@ function createSettingsStore() {
   return {
     subscribe,
     save: (newSettings) => {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(newSettings))
+      try {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(newSettings))
+      } catch (e) {
+        console.warn('Failed to persist settings:', e)
+        // In-memory store still updated — settings work for this session
+      }
       set(newSettings)
     }
   }

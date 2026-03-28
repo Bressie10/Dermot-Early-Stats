@@ -51,11 +51,16 @@ export async function loadMatches() {
   return all.filter(m => !m.isDraft)
 }
 
+// FIX: Use a single transaction across both stores so the clear is atomic.
+// If the app crashes mid-way the DB rolls back to a consistent state.
 export async function clearAllData() {
   const db = await getDB()
-  await db.clear('squad')
-  await db.clear('matches')
+  const tx = db.transaction(['squad', 'matches'], 'readwrite')
+  tx.objectStore('squad').clear()
+  tx.objectStore('matches').clear()
+  await tx.done
 }
+
 export async function saveDraftMatch(match) {
   let lastErr
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -79,4 +84,20 @@ export async function loadDraftMatch() {
 export async function clearDraftMatch() {
   const db = await getDB()
   await db.delete('matches', 'draft')
+}
+
+// FIX: Poison the draft record so it won't be auto-resumed even if clearDraftMatch
+// hasn't run yet. Called immediately after saveMatch succeeds in finishMatch().
+// This prevents duplicate matches if the app crashes between saveMatch and clearDraftMatch.
+export async function markDraftSaved() {
+  try {
+    const db = await getDB()
+    const draft = await db.get('matches', 'draft')
+    if (draft) {
+      await db.put('matches', { ...draft, _saved: true })
+    }
+  } catch (e) {
+    console.warn('markDraftSaved failed:', e)
+    // Non-fatal — clearDraftMatch will clean it up normally
+  }
 }

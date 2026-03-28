@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { saveSquad, loadSquad, saveMatch, saveDraftMatch, loadDraftMatch, clearDraftMatch } from './db.js'
+  import { saveSquad, loadSquad, saveMatch, saveDraftMatch, loadDraftMatch, clearDraftMatch, markDraftSaved } from './db.js'
   import { user } from './auth-store.js'
   import { scheduleAutoSync } from './sync.js'
   import { settingsStore } from './settings-store.js'
@@ -14,6 +14,19 @@
   let matchDate = new Date().toISOString().split('T')[0]
   let nextId = 21
   let events = []
+
+  // ── LINEUP ───────────────────────────────────
+  // Auto-populated from squad jersey numbers; saved with match for PDF export
+  let lineup = {} // { [positionNumber: 1-15]: playerId }
+
+  function initLineup() {
+    lineup = {}
+    players.forEach(p => {
+      if (p.name.trim() && p.number >= 1 && p.number <= 15) {
+        lineup[p.number] = p.id
+      }
+    })
+  }
 
   // ── PUCKOUT TRACKING ─────────────────────────
   let puckouts = []
@@ -64,6 +77,8 @@
       players = defaultSquad.map(p => ({ ...p }))
     }
 
+    initLineup()
+
     // Check for in-progress draft — auto-resume without asking
     const draft = await loadDraftMatch()
     if (draft && draft.opposition && !draft._saved) {
@@ -80,6 +95,7 @@
       subs_log = draft.subs_log || []
       puckouts = draft.puckouts || []
       oppScores = draft.oppScores || []
+      lineup = draft.lineup || {}
       if (draft.players?.length > 0) players = draft.players
 
       // Restore timer — if it was running when app closed, calculate real elapsed time
@@ -134,6 +150,7 @@
       }
     })
     stats = stats
+    initLineup()
     screen = 'match'
     saveDraft()
   }
@@ -258,6 +275,7 @@
         subs_log,
         puckouts,
         oppScores,
+        lineup,
         timerSeconds,
         timerStartedAt: timerRunning ? timerStartedAt : null,
         screen: screen === 'stats' ? 'stats' : 'match'
@@ -277,9 +295,13 @@
       await saveMatch({
         id: Date.now(), date: matchDate, opposition, venue, competition,
         period, score: matchScore, stats, notes, customStats, events,
-        subs_log, puckouts, oppScores,
+        subs_log, puckouts, oppScores, lineup,
         players: players.map(p => ({ ...p }))
       })
+      // FIX: Poison the draft immediately after saveMatch succeeds.
+      // If clearDraftMatch throws or the app crashes before it runs, the _saved
+      // flag prevents the already-saved match from being auto-resumed and duplicated.
+      await markDraftSaved()
       await clearDraftMatch()
       // Reset all state
       clearInterval(timerInterval)
@@ -300,9 +322,16 @@
       timerSeconds = 0
       period = $settingsStore.defaultPeriod || '1st Half'
       screen = 'setup'
+      // FIX: Trigger auto-sync so the finished match is backed up without
+      // requiring the coach to manually tap Sync.
+      scheduleAutoSync($user?.id)
       alert('Match saved!')
     } catch (e) {
       alert('Save failed — please try again. Your match data is still safe.')
+      // FIX: Restore timerStartedAt so wall-clock recovery works correctly
+      // if the app closes after this failure. Without this, reopening the app
+      // would calculate elapsed from the wrong reference point.
+      timerStartedAt = Date.now() - timerSeconds * 1000
       timerInterval = setInterval(() => { timerSeconds++; saveDraft() }, 1000)
       timerRunning = true
     } finally {
@@ -347,6 +376,8 @@
   let timerInterval = null
   let timerStartedAt = null  // Date.now() when timer last started — survives app close
 
+  $: timerOverTime = timerSeconds >= ($settingsStore.periodLength || 30) * 60
+
   function toggleTimer() {
     if (timerRunning) {
       clearInterval(timerInterval)
@@ -367,6 +398,40 @@
     saveDraft()
   }
   function formatTime(s) { return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}` }
+
+  // FIX: findLastIndex helper — Array.prototype.findLastIndex not available in all targets
+  function findLastIndex(arr, pred) {
+    for (let i = arr.length - 1; i >= 0; i--) { if (pred(arr[i])) return i }
+    return -1
+  }
+
+  // FIX: When trackOppScores is on, decrementing the opposition score must also
+  // remove the last matching entry from oppScores. Previously the scoreboard and
+  // the detailed breakdown would diverge (e.g. scoreboard showed 1 goal but
+  // oppScores still had 2 goal entries with marker/player data).
+  function undoOppPoint() {
+    if (matchScore.away.points <= 0) return
+    matchScore.away.points--
+    matchScore = matchScore
+    if ($settingsStore.trackOppScores) {
+      const idx = findLastIndex(oppScores, s => s.type === 'point')
+      if (idx !== -1) oppScores = oppScores.filter((_, i) => i !== idx)
+    }
+    saveDraft()
+    scheduleAutoSync($user?.id)
+  }
+
+  function undoOppGoal() {
+    if (matchScore.away.goals <= 0) return
+    matchScore.away.goals--
+    matchScore = matchScore
+    if ($settingsStore.trackOppScores) {
+      const idx = findLastIndex(oppScores, s => s.type === 'goal')
+      if (idx !== -1) oppScores = oppScores.filter((_, i) => i !== idx)
+    }
+    saveDraft()
+    scheduleAutoSync($user?.id)
+  }
 
   // ── PUCKOUT FUNCTIONS ────────────────────────
   function openPuckoutModal() {
@@ -436,6 +501,14 @@
 
   // ── QUICK VIEW STATS ──────────────────────────
   function openStatsView() {
+    // Reset section open state to current settings defaults each time the panel opens
+    const qv = $settingsStore.quickViewSections
+    openSections = {
+      puckouts: qv?.puckouts ?? true,
+      conceded: qv?.conceded ?? true,
+      players: qv?.players ?? false,
+      subs: qv?.subs ?? false,
+    }
     screen = 'stats'
     saveDraft()
   }
@@ -555,7 +628,7 @@
     <img src="doora-barefield.png" alt="Doora Barefield GAA" class="hero-logo">
     <div>
       <h2>New Match</h2>
-      <p>Doora Barefield GAA · Minor Hurling</p>
+      <p>{$settingsStore.teamName || 'GAA Stats'} · {$settingsStore.ageGroup || ''} Hurling</p>
     </div>
   </div>
 
@@ -627,7 +700,7 @@
     </div>
     <div class="scoreboard">
       <div class="score-block">
-        <div class="score-label">DB</div>
+        <div class="score-label">{($settingsStore.teamName || 'Home').slice(0,4).toUpperCase()}</div>
         <div class="score-val">{formatScore(matchScore.home)}</div>
       </div>
       <div class="score-divider">–</div>
@@ -635,9 +708,9 @@
         <div class="score-label">{opposition.slice(0,4).toUpperCase()}</div>
         <div class="score-val">{formatScore(matchScore.away)}</div>
         <div class="opp-btns">
-          <button class="opp-btn" on:click={() => { if(matchScore.away.points>0) matchScore.away.points--; matchScore=matchScore; saveDraft() }}>−P</button>
+          <button class="opp-btn" on:click={undoOppPoint}>−P</button>
           <button class="opp-btn opp-btn-score" on:click={() => handleOppScore('point')}>+P</button>
-          <button class="opp-btn" on:click={() => { if(matchScore.away.goals>0) matchScore.away.goals--; matchScore=matchScore; saveDraft() }}>−G</button>
+          <button class="opp-btn" on:click={undoOppGoal}>−G</button>
           <button class="opp-btn opp-btn-score" on:click={() => handleOppScore('goal')}>+G</button>
         </div>
       </div>
@@ -646,7 +719,7 @@
 
   <div class="card timer-card">
     <div class="timer-left">
-      <div class="timer-display" class:running={timerRunning}>{formatTime(timerSeconds)}</div>
+      <div class="timer-display" class:running={timerRunning} class:overtime={timerOverTime}>{formatTime(timerSeconds)}</div>
       <div class="timer-btns">
         <button class="timer-btn primary" on:click={toggleTimer}>
           {#if timerRunning}
@@ -854,7 +927,7 @@
             <!-- Pitch background -->
             <rect width="300" height="200" fill="#2d7a2d" rx="4"/>
             <!-- Left half — DB end -->
-            <rect x="0" y="0" width="150" height="200" fill="rgba(107,27,43,0.15)" rx="4"/>
+            <rect x="0" y="0" width="150" height="200" class="pitch-end-zone" rx="4"/>
             <!-- Right half — Opposition end -->
             <rect x="150" y="0" width="150" height="200" fill="rgba(0,0,0,0.08)" rx="4"/>
             <!-- Pitch outline -->
@@ -1096,7 +1169,7 @@
     <div class="ht-badge">{period} · {formatTime(timerSeconds)}</div>
     <div class="ht-score-bar-fixture">
       <div class="ht-score-bar-team">
-        <div class="ht-score-bar-name">Doora Barefield</div>
+        <div class="ht-score-bar-name">{$settingsStore.teamName || 'Home'}</div>
         <div class="ht-score-bar-val">{formatScore(matchScore.home)}</div>
       </div>
       <div class="ht-score-bar-sep">–</div>
@@ -1469,21 +1542,21 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    background: rgba(107,27,43,0.08);
-    border: 1px solid rgba(107,27,43,0.2);
+    background: rgba(var(--primary-rgb),0.08);
+    border: 1px solid rgba(var(--primary-rgb),0.2);
     border-radius: 10px;
     padding: 1rem;
   }
   .recover-stat { text-align: center; flex: 1; }
-  .recover-stat-val { font-size: 18px; font-weight: 700; color: #6B1B2B; }
+  .recover-stat-val { font-size: 18px; font-weight: 700; color: var(--primary); }
   .recover-stat-label { font-size: 10px; color: var(--text-faint); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
-  .recover-stat-divider { width: 1px; height: 36px; background: #e8c0c8; flex-shrink: 0; }
+  .recover-stat-divider { width: 1px; height: 36px; background: var(--border); flex-shrink: 0; }
 
   .recover-actions { display: flex; flex-direction: column; gap: 10px; }
   .recover-resume-btn {
     width: 100%;
     padding: 15px;
-    background: #6B1B2B;
+    background: var(--primary);
     color: white;
     border: none;
     border-radius: 10px;
@@ -1493,7 +1566,7 @@
     font-family: inherit;
     transition: background 0.2s;
   }
-  .recover-resume-btn:hover { background: #551522; }
+  .recover-resume-btn:hover { background: var(--primary-hover); }
   .recover-discard-btn {
     width: 100%;
     padding: 12px;
@@ -1518,9 +1591,9 @@
   .field-group { display: flex; flex-direction: column; gap: 6px; }
   .field-group label { font-size: 13px; font-weight: 600; color: var(--text-2); }
   .field-group input { padding: 13px 14px; border: 1.5px solid var(--input-border); border-radius: 10px; font-size: 16px; font-family: inherit; width: 100%; background: var(--surface-3); transition: all 0.15s; min-height: 46px; }
-  .field-group input:focus { outline: none; border-color: #6B1B2B; background: var(--surface); box-shadow: 0 0 0 3px rgba(107,27,43,0.08); }
+  .field-group input:focus { outline: none; border-color: var(--primary); background: var(--surface); box-shadow: 0 0 0 3px rgba(var(--primary-rgb),0.08); }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .squad-preview-card { background: #6B1B2B; border-radius: 14px; padding: 1.25rem; color: white; }
+  .squad-preview-card { background: var(--primary); border-radius: 14px; padding: 1.25rem; color: white; }
   .squad-preview-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; opacity: 0.85; margin-bottom: 1rem; }
   .squad-dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; box-shadow: 0 0 0 2px rgba(76,175,80,0.3); }
   .squad-preview-stats { display: flex; align-items: center; justify-content: space-around; margin-bottom: 1rem; }
@@ -1543,17 +1616,19 @@
   .score-divider { font-size: 22px; color: var(--text-faint); }
   .opp-btns { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; justify-content: center; }
   .opp-btn { padding: 6px 10px; font-size: 12px; font-weight: 600; border: 1px solid var(--input-border); border-radius: 6px; background: var(--surface); cursor: pointer; color: var(--text-2); font-family: inherit; min-height: 36px; min-width: 36px; }
-  .opp-btn:hover { border-color: #6B1B2B; color: #6B1B2B; }
+  .opp-btn:hover { border-color: var(--primary); color: var(--primary); }
   .timer-card { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
   .timer-left { display: flex; align-items: center; gap: 10px; }
   .timer-display { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); min-width: 80px; }
-  .timer-display.running { color: #6B1B2B; }
+  .timer-display.running { color: var(--primary); }
+  .timer-display.overtime { color: #e53935; }
+  .timer-display.overtime.running { color: #e53935; }
   .timer-btns { display: flex; gap: 6px; }
   .timer-btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; border-radius: 8px; border: 1.5px solid var(--input-border); background: none; color: var(--text-2); font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 44px; }
-  .timer-btn.primary { background: #6B1B2B; border-color: #6B1B2B; color: white; }
+  .timer-btn.primary { background: var(--primary); border-color: var(--primary); color: white; }
   .period-pills { display: flex; gap: 6px; flex-wrap: wrap; }
   .period-btn { padding: 8px 14px; border-radius: 20px; border: 1px solid var(--input-border); background: none; font-size: 13px; color: var(--text-muted); cursor: pointer; white-space: nowrap; font-family: inherit; min-height: 40px; }
-  .period-btn.active { background: #6B1B2B; color: white; border-color: #6B1B2B; font-weight: 600; }
+  .period-btn.active { background: var(--primary); color: white; border-color: var(--primary); font-weight: 600; }
   .undo-row { display: flex; justify-content: flex-end; }
   .undo-btn {
     padding: 8px 16px; border-radius: 8px;
@@ -1565,25 +1640,25 @@
   .mode-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .mode-toggle { display: flex; border: 1px solid var(--input-border); border-radius: 8px; overflow: hidden; }
   .mode-toggle button { padding: 10px 20px; border: none; background: none; font-size: 14px; color: var(--text-muted); cursor: pointer; font-family: inherit; min-height: 44px; }
-  .mode-toggle button.active { background: #6B1B2B; color: white; font-weight: 600; }
-  .sub-btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; border-radius: 8px; border: 1.5px solid #6B1B2B; background: none; color: #6B1B2B; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; min-height: 44px; }
-  .sub-btn:hover { background: #6B1B2B; color: white; }
+  .mode-toggle button.active { background: var(--primary); color: white; font-weight: 600; }
+  .sub-btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; border-radius: 8px; border: 1.5px solid var(--primary); background: none; color: var(--primary); font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; min-height: 44px; }
+  .sub-btn:hover { background: var(--primary); color: white; }
   .section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 6px; }
   .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
   .stat-btn { position: relative; padding: 18px 12px; border-radius: 10px; border: 1.5px solid var(--input-border); background: var(--surface); font-size: 15px; font-weight: 600; color: var(--text); cursor: pointer; transition: all 0.15s; text-align: center; font-family: inherit; min-height: 64px; }
-  .stat-btn:hover { border-color: #6B1B2B; color: #6B1B2B; background: rgba(107,27,43,0.08); }
+  .stat-btn:hover { border-color: var(--primary); color: var(--primary); background: rgba(var(--primary-rgb),0.08); }
   .stat-btn:active { transform: scale(0.97); }
   .stat-btn.dashed { border-style: dashed; color: var(--text-faint); font-weight: 400; }
-  .stat-btn.dashed:hover { color: #6B1B2B; border-color: #6B1B2B; }
+  .stat-btn.dashed:hover { color: var(--primary); border-color: var(--primary); }
   .custom-tag { display: block; font-size: 10px; font-weight: 400; color: var(--text-faint); margin-top: 4px; }
   .add-stat-input { display: flex; align-items: center; gap: 6px; padding: 10px 12px; }
   .add-stat-input input { flex: 1; border: none; outline: none; font-size: 14px; font-family: inherit; min-width: 0; background: transparent; color: var(--text); }
-  .confirm-btn { padding: 4px 10px; background: #6B1B2B; color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .confirm-btn { padding: 4px 10px; background: var(--primary); color: white; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
   .cancel-small { background: none; border: none; color: var(--text-faint); font-size: 14px; cursor: pointer; padding: 2px 4px; }
   .custom-stat-row { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-  .custom-stat-btn { padding: 7px 16px; border-radius: 8px; border: 1.5px dashed #6B1B2B; background: rgba(107,27,43,0.06); color: #6B1B2B; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.15s; }
-  .custom-stat-btn:hover { background: #6B1B2B; color: white; }
-  .custom-stat-input-wrap { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1.5px solid #6B1B2B; border-radius: 8px; padding: 6px 10px; width: 100%; max-width: 320px; }
+  .custom-stat-btn { padding: 7px 16px; border-radius: 8px; border: 1.5px dashed var(--primary); background: rgba(var(--primary-rgb),0.06); color: var(--primary); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+  .custom-stat-btn:hover { background: var(--primary); color: white; }
+  .custom-stat-input-wrap { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1.5px solid var(--primary); border-radius: 8px; padding: 6px 10px; width: 100%; max-width: 320px; }
   .custom-stat-input { flex: 1; border: none; outline: none; font-size: 14px; font-family: inherit; min-width: 0; background: transparent; }
   .table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
   .player-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 340px; }
@@ -1593,15 +1668,15 @@
   .player-table td { padding: 6px; border-bottom: 1px solid var(--divider-faint); text-align: center; }
   .player-table tr:last-child td { border-bottom: none; }
   .td-player { text-align: left; padding-left: 12px; white-space: nowrap; font-weight: 500; }
-  .num-badge { display: inline-block; font-size: 11px; background: #6B1B2B; color: white; border-radius: 4px; padding: 1px 5px; font-weight: 600; margin-right: 4px; }
+  .num-badge { display: inline-block; font-size: 11px; background: var(--primary); color: var(--primary-text); border-radius: 4px; padding: 1px 5px; font-weight: 600; margin-right: 4px; }
   .num-badge.sub { background: var(--text-muted); }
   .counter { display: flex; align-items: center; justify-content: center; gap: 4px; }
   .mini-dec, .mini-inc { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--input-border); background: var(--surface); font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; font-family: inherit; flex-shrink: 0; }
-  .mini-inc { border-color: #6B1B2B; color: #6B1B2B; }
+  .mini-inc { border-color: var(--primary); color: var(--primary); }
   .mini-val { font-size: 14px; font-weight: 600; min-width: 20px; text-align: center; }
   .sub-log-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--divider); font-size: 13px; }
   .sub-log-row:last-child { border-bottom: none; }
-  .sub-time { font-weight: 700; color: #6B1B2B; min-width: 44px; }
+  .sub-time { font-weight: 700; color: var(--primary); min-width: 44px; }
   .sub-detail { flex: 1; color: var(--text); }
   .sub-period { font-size: 11px; color: var(--text-faint); }
   .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: flex-end; justify-content: center; z-index: 200; }
@@ -1610,7 +1685,7 @@
   .modal-section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); margin: 0.75rem 0 0.5rem; }
   .player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
   .player-btn { display: flex; flex-direction: column; align-items: center; padding: 14px 8px; border-radius: 10px; border: 1.5px solid var(--input-border); background: var(--surface); cursor: pointer; transition: all 0.15s; gap: 4px; font-family: inherit; min-height: 64px; }
-  .player-btn:active { transform: scale(0.96); border-color: #6B1B2B; background: rgba(107,27,43,0.08); }
+  .player-btn:active { transform: scale(0.96); border-color: var(--primary); background: rgba(var(--primary-rgb),0.08); }
   .player-btn.sub { opacity: 0.7; }
   .player-num { font-size: 11px; color: var(--text-muted); }
   .player-name { font-size: 13px; font-weight: 600; color: var(--text); text-align: center; }
@@ -1618,11 +1693,12 @@
   .optional-tag { font-size: 12px; font-weight: 400; color: var(--text-faint); margin-left: 6px; }
   .pitch-wrap { margin: 0.75rem 0; border-radius: 8px; overflow: hidden; cursor: crosshair; }
   .pitch-svg { width: 100%; height: auto; display: block; }
+  .pitch-end-zone { fill: rgba(var(--primary-rgb), 0.15); }
   .ghost-btn { width: 100%; padding: 10px; border: 1.5px dashed var(--input-border); border-radius: 8px; background: none; color: var(--text-faint); font-size: 13px; cursor: pointer; font-family: inherit; }
-  .ghost-btn:hover { border-color: #6B1B2B; color: #6B1B2B; }
+  .ghost-btn:hover { border-color: var(--primary); color: var(--primary); }
   .notes-section { margin-top: 4px; }
   textarea { width: 100%; min-height: 80px; border: 1px solid var(--input-border); border-radius: 8px; padding: 12px 14px; font-size: 16px; font-family: inherit; color: var(--text); resize: vertical; background: var(--surface); }
-  textarea:focus { outline: none; border-color: #6B1B2B; }
+  textarea:focus { outline: none; border-color: var(--primary); }
   @media (max-width: 480px) {
     .match-header { flex-direction: column; align-items: flex-start; }
     .scoreboard { width: 100%; justify-content: center; }
@@ -1674,9 +1750,9 @@
     gap: 6px;
     padding: 10px 14px;
     border-radius: 8px;
-    border: 1.5px solid #6B1B2B;
+    border: 1.5px solid var(--primary);
     background: none;
-    color: #6B1B2B;
+    color: var(--primary);
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
@@ -1685,13 +1761,13 @@
     min-height: 44px;
     transition: all 0.15s;
   }
-  .stats-view-btn:hover { background: #6B1B2B; color: white; }
+  .stats-view-btn:hover { background: var(--primary); color: white; }
 
   /* ── BACK TO MATCH BUTTON ── */
   .back-to-match-btn {
     width: 100%;
     padding: 15px;
-    background: #6B1B2B;
+    background: var(--primary);
     color: white;
     border: none;
     border-radius: 12px;
@@ -1701,7 +1777,7 @@
     font-family: inherit;
     transition: background 0.2s;
   }
-  .back-to-match-btn:hover { background: #551522; }
+  .back-to-match-btn:hover { background: var(--primary-hover); }
 
   /* ── PUCKOUT SUMMARY BAR ── */
   .puckout-summary-bar {
@@ -1747,7 +1823,7 @@
   .outcome-btn.won.selected { background: #2d7a2d; color: white; border-color: #2d7a2d; }
   .outcome-btn.lost { color: #e53935; }
   .outcome-btn.lost.selected { background: #e53935; color: white; border-color: #e53935; }
-  .outcome-btn:not(.selected):hover { border-color: #6B1B2B; }
+  .outcome-btn:not(.selected):hover { border-color: var(--primary); }
 
   .modal-input {
     width: 100%;
@@ -1761,9 +1837,9 @@
     margin-bottom: 0.5rem;
     min-height: 50px;
   }
-  .modal-input:focus { outline: none; border-color: #6B1B2B; background: var(--surface); }
+  .modal-input:focus { outline: none; border-color: var(--primary); background: var(--surface); }
 
-  .selected-player { border-color: #6B1B2B; background: rgba(107,27,43,0.1); }
+  .selected-player { border-color: var(--primary); background: rgba(var(--primary-rgb),0.1); }
 
   .confirm-log-btn {
     width: 100%;
@@ -1771,7 +1847,7 @@
     padding: 15px;
     border-radius: 10px;
     border: none;
-    background: #6B1B2B;
+    background: var(--primary);
     color: white;
     font-size: 16px;
     font-weight: 700;
@@ -1780,14 +1856,14 @@
     min-height: 50px;
     transition: background 0.15s;
   }
-  .confirm-log-btn:hover:not(:disabled) { background: #551522; }
+  .confirm-log-btn:hover:not(:disabled) { background: var(--primary-hover); }
   .confirm-log-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* ── HALFTIME SCREEN ── */
   .ht-header { text-align: center; padding: 1rem 0 0.5rem; }
   .ht-badge {
     display: inline-block;
-    background: #6B1B2B;
+    background: var(--primary);
     color: white;
     border-radius: 20px;
     font-size: 12px;
@@ -1865,7 +1941,7 @@
 
   /* ── HALFTIME SCORE BAR ── */
   .ht-score-bar {
-    background: #6B1B2B;
+    background: var(--primary);
     border-radius: 14px;
     padding: 14px 16px;
     display: flex;
@@ -1946,9 +2022,9 @@
     align-items: center;
     gap: 8px;
     padding: 10px 12px;
-    background: rgba(107,27,43,0.06);
-    border: 1px solid rgba(107,27,43,0.15);
-    border-left: 3px solid #6B1B2B;
+    background: rgba(var(--primary-rgb),0.06);
+    border: 1px solid rgba(var(--primary-rgb),0.15);
+    border-left: 3px solid var(--primary);
     border-radius: 8px;
     margin-bottom: 10px;
     flex-wrap: wrap;
@@ -1998,25 +2074,26 @@
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    background: rgba(107,27,43,0.07);
-    border: 1px solid rgba(107,27,43,0.18);
+    background: rgba(var(--primary-rgb),0.07);
+    border: 1px solid rgba(var(--primary-rgb),0.18);
     border-radius: 8px;
     margin-bottom: 8px;
     flex-wrap: wrap;
   }
-  .zone-filter-name { font-size: 13px; font-weight: 700; color: #6B1B2B; flex: 1; }
+  .zone-filter-name { font-size: 13px; font-weight: 700; color: var(--primary); flex: 1; }
   .zone-filter-stats { font-size: 13px; color: var(--text-muted); flex-shrink: 0; }
   .zone-filter-clear {
     padding: 4px 10px;
     border-radius: 6px;
-    border: 1px solid rgba(107,27,43,0.3);
+    border: 1px solid rgba(var(--primary-rgb),0.3);
     background: none;
-    color: #6B1B2B;
+    color: var(--primary);
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     font-family: inherit;
     flex-shrink: 0;
   }
-  .zone-filter-clear:hover { background: #6B1B2B; color: white; }
+  .zone-filter-clear:hover { background: var(--primary); color: white; }
+
 </style>

@@ -330,7 +330,7 @@
     font-size: 16px; font-family: inherit; text-align: center; background: var(--surface); color: var(--text);
     min-height: 38px;
   }
-  .target-input:focus { outline: none; border-color: #6B1B2B; }
+  .target-input:focus { outline: none; border-color: var(--primary); }
 
   .status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
   .status-badge.met { background: #e6f4ea; color: #2d7a2d; }
@@ -356,18 +356,18 @@
   .trend-indicator.down { background: #fce8e8; color: #c62828; }
   .trend-indicator.stable { background: var(--surface-2); color: var(--text-muted); }
 
-  .add-stat-btn { padding: 8px 14px; border-radius: 6px; border: 1.5px dashed #6B1B2B; background: none; color: #6B1B2B; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 38px; }
+  .add-stat-btn { padding: 8px 14px; border-radius: 6px; border: 1.5px dashed var(--primary); background: none; color: var(--primary); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; min-height: 38px; }
   .add-stat-wrap { display: flex; align-items: center; gap: 6px; }
-  .add-stat-wrap input { padding: 8px 10px; border: 1.5px solid #6B1B2B; border-radius: 6px; font-size: 16px; font-family: inherit; outline: none; width: 150px; min-height: 38px; background: var(--surface); color: var(--text); }
-  .confirm-btn { padding: 8px 12px; background: #6B1B2B; color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 38px; }
+  .add-stat-wrap input { padding: 8px 10px; border: 1.5px solid var(--primary); border-radius: 6px; font-size: 16px; font-family: inherit; outline: none; width: 150px; min-height: 38px; background: var(--surface); color: var(--text); }
+  .confirm-btn { padding: 8px 12px; background: var(--primary); color: white; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 38px; }
   .cancel-small { background: none; border: none; color: var(--text-faint); font-size: 18px; cursor: pointer; padding: 4px 8px; min-height: 38px; }
 
-  .save-btn { display: inline-flex; align-items: center; gap: 6px; padding: 11px 20px; background: #6B1B2B; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.2s; flex-shrink: 0; min-height: 44px; }
+  .save-btn { display: inline-flex; align-items: center; gap: 6px; padding: 11px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.2s; flex-shrink: 0; min-height: 44px; }
   .save-btn.saved { background: #2d7a2d; }
-  .save-btn:hover { background: #551522; }
-  .save-btn-full { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 15px; background: #6B1B2B; color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; transition: background 0.2s; }
+  .save-btn:hover { background: var(--primary-hover); }
+  .save-btn-full { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 15px; background: var(--primary); color: white; border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; transition: background 0.2s; }
   .save-btn-full.saved { background: #2d7a2d; }
-  .save-btn-full:hover { background: #551522; }
+  .save-btn-full:hover { background: var(--primary-hover); }
 
   @media (max-width: 480px) {
     .targets-header, .target-row { grid-template-columns: 1fr 60px 60px 70px 60px; }

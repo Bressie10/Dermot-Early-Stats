@@ -1,31 +1,28 @@
 :root {
-  --bg: #f8f8f6;
-  --surface: #ffffff;
-  --surface-2: #f8f8f8;
-  --surface-3: #fafafa;
-  --border: #e5e5e5;
-  --input-border: #e0e0e0;
-  --divider: #f0f0f0;
-  --divider-faint: #f5f5f5;
-  --text: #1a1a1a;
-  --text-2: #555555;
-  --text-muted: #888888;
-  --text-faint: #aaaaaa;
+  --bg: #F4F6F3;
+  --surface: #FFFFFF;
+  --surface-2: #F1F4EF;
+  --surface-3: #F7F9F6;
+  --border: #DDE4D8;
+  --input-border: #CDD6C8;
+  --divider: #EBF0E7;
+  --divider-faint: #F2F5F0;
+  --text: #1A2015;
+  --text-2: #4A5E40;
+  --text-muted: #7A8E70;
+  --text-faint: #A8BCA2;
+  --primary: #5A8A00;
+  --primary-hover: #487000;
+  --primary-rgb: 90, 138, 0;
+  --primary-text: #ffffff;
+
+  --shadow-sm: 0 1px 3px rgba(26,32,21,0.07), 0 1px 2px rgba(26,32,21,0.05);
+  --shadow-md: 0 4px 12px rgba(26,32,21,0.08), 0 2px 4px rgba(26,32,21,0.05);
+  --shadow-lg: 0 8px 24px rgba(26,32,21,0.10), 0 4px 8px rgba(26,32,21,0.06);
 }
 
-[data-theme="dark"] {
-  --bg: #111111;
-  --surface: #1e1e1e;
-  --surface-2: #252525;
-  --surface-3: #222222;
-  --border: #2e2e2e;
-  --input-border: #383838;
-  --divider: #2a2a2a;
-  --divider-faint: #252525;
-  --text: #f0f0f0;
-  --text-2: #a0a0a0;
-  --text-muted: #808080;
-  --text-faint: #606060;
+html {
+  scroll-behavior: smooth;
 }
 
 *, *::before, *::after {
@@ -35,11 +32,13 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 16px;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 button {
@@ -47,6 +46,12 @@ button {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Thin scrollbars */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
 
 /* Prevent iOS from zooming on input focus */
 @media (max-width: 768px) {

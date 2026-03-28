@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { loadMatches } from './db.js'
+  import { settingsStore } from './settings-store.js'
 
   let matches = []
   let selectedMatch = null
@@ -152,7 +153,7 @@
     <div class="result-card">
       <div class="result-teams">
         <div class="result-team">
-          <div class="result-team-name">Doora Barefield</div>
+          <div class="result-team-name">{$settingsStore.teamName || 'Home'}</div>
           <div class="result-score">{formatScore(selectedMatch.score?.home)}</div>
         </div>
         <div class="result-middle">
@@ -267,7 +268,7 @@
           <rect x={i*72} y="0" width="36" height="320" fill="rgba(0,0,0,0.04)"/>
         {/each}
         <!-- DB end tint -->
-        <rect x="0" y="0" width="250" height="320" fill="rgba(107,27,43,0.12)" rx="6"/>
+        <rect x="0" y="0" width="250" height="320" class="pitch-end-zone" rx="6"/>
         <!-- Pitch outline -->
         <rect x="6" y="6" width="488" height="308" fill="none" stroke="white" stroke-width="2" opacity="0.8"/>
         <!-- Halfway line -->
@@ -406,7 +407,7 @@
   .field-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 200px; }
   .field-group label { font-size: 12px; font-weight: 600; color: var(--text-2); }
   .field-group select { padding: 12px 12px; border: 1.5px solid var(--input-border); border-radius: 10px; font-size: 16px; font-family: inherit; background: var(--surface); color: var(--text); width: 100%; min-height: 46px; }
-  .field-group select:focus { outline: none; border-color: #6B1B2B; }
+  .field-group select:focus { outline: none; border-color: var(--primary); }
   .empty-state { text-align: center; padding: 3rem 1rem; color: var(--text-faint); }
   .empty-icon { font-size: 36px; margin-bottom: 0.75rem; }
   .empty-title { font-size: 16px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; }
@@ -429,16 +430,16 @@
   .metric-val { font-size: 24px; font-weight: 700; color: var(--text); }
   .metric-sub { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
   .performers-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .performer-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.875rem 1rem; border-left: 3px solid #6B1B2B; }
+  .performer-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.875rem 1rem; border-left: 3px solid var(--primary); }
   .performer-label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
   .performer-name { font-size: 15px; font-weight: 700; color: var(--text); }
-  .performer-val { font-size: 13px; color: #6B1B2B; font-weight: 600; margin-top: 2px; }
+  .performer-val { font-size: 13px; color: var(--primary); font-weight: 600; margin-top: 2px; }
   .pitch-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }
   .pitch-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 8px; }
   .section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); }
   .filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
   .filter-pill { padding: 8px 14px; border-radius: 20px; border: 1px solid var(--input-border); background: none; font-size: 13px; color: var(--text-muted); cursor: pointer; font-family: inherit; transition: all 0.15s; min-height: 36px; }
-  .filter-pill.active { background: #6B1B2B; color: white; border-color: #6B1B2B; font-weight: 600; }
+  .filter-pill.active { background: var(--primary); color: white; border-color: var(--primary); font-weight: 600; }
   .period-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 0.75rem; }
   .period-pill { padding: 7px 12px; border-radius: 20px; border: 1px solid var(--input-border); background: none; font-size: 12px; color: var(--text-muted); cursor: pointer; font-family: inherit; transition: all 0.15s; min-height: 34px; }
   .period-pill.active { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
@@ -446,12 +447,13 @@
   .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); }
   .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
   .pitch-svg { width: 100%; height: auto; display: block; border-radius: 6px; }
+  .pitch-end-zone { fill: rgba(var(--primary-rgb), 0.12); }
   .pitch-count { font-size: 11px; color: var(--text-faint); text-align: right; margin-top: 6px; }
   .stat-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--divider-faint); }
   .stat-row:last-child { border-bottom: none; }
   .stat-label { font-size: 13px; color: var(--text-2); min-width: 130px; }
   .stat-bar-wrap { flex: 1; height: 6px; background: var(--divider); border-radius: 3px; overflow: hidden; }
-  .stat-bar { height: 100%; background: #6B1B2B; border-radius: 3px; }
+  .stat-bar { height: 100%; background: var(--primary); border-radius: 3px; }
   .stat-val { font-size: 13px; font-weight: 700; color: var(--text); min-width: 24px; text-align: right; }
   .table-wrap { width: 100%; overflow-x: auto; }
   .stats-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 360px; }
@@ -461,7 +463,7 @@
   .stats-table td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--divider-faint); color: var(--text); }
   .stats-table tr:last-child td { border-bottom: none; }
   .td-left { text-align: left; padding-left: 1rem; font-weight: 600; white-space: nowrap; }
-  .num-badge { display: inline-block; font-size: 11px; background: #6B1B2B; color: white; border-radius: 4px; padding: 1px 5px; font-weight: 600; margin-right: 4px; }
+  .num-badge { display: inline-block; font-size: 11px; background: var(--primary); color: white; border-radius: 4px; padding: 1px 5px; font-weight: 600; margin-right: 4px; }
   .notes-text { font-size: 14px; color: var(--text-2); line-height: 1.6; }
   .tooltip { position: fixed; background: #1a1a1a; color: white; padding: 6px 10px; border-radius: 6px; font-size: 12px; pointer-events: none; z-index: 300; white-space: nowrap; }
   @media (min-width: 600px) { .metrics-grid { grid-template-columns: repeat(4, 1fr); } }
