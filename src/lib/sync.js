@@ -64,6 +64,24 @@ export async function syncToSupabase(userId) {
       }
     }
 
+    // FIX: Delete from cloud any matches that no longer exist locally.
+    // Previously syncToSupabase only ever upserted — deletions were never
+    // propagated, so deleted matches reappeared after the next login/sync.
+    // Requires the Supabase RLS policy to allow DELETE where user_id = auth.uid().
+    const { data: remoteMatches } = await supabase
+      .from('matches').select('id').eq('user_id', userId)
+    if (remoteMatches) {
+      const localMatchIds = new Set(matches.map(m => String(m.id)))
+      const matchesToDelete = remoteMatches
+        .filter(r => !localMatchIds.has(String(r.id)))
+        .map(r => r.id)
+      if (matchesToDelete.length > 0) {
+        const { error: delErr } = await supabase
+          .from('matches').delete().eq('user_id', userId).in('id', matchesToDelete)
+        if (delErr) console.warn('Failed to delete removed matches from cloud:', delErr)
+      }
+    }
+
     // ── Sync squad ────────────────────────────────────────────────────────────
     if (squad.length > 0) {
       const squadRows = squad.map(p => ({
@@ -75,6 +93,21 @@ export async function syncToSupabase(userId) {
       }))
       const { error } = await supabase.from('squad').upsert(squadRows, { onConflict: 'id,user_id' })
       if (error) throw error
+    }
+
+    // FIX: Delete from cloud any squad players that no longer exist locally.
+    const { data: remoteSquad } = await supabase
+      .from('squad').select('id').eq('user_id', userId)
+    if (remoteSquad) {
+      const localSquadIds = new Set(squad.map(p => String(p.id)))
+      const squadToDelete = remoteSquad
+        .filter(r => !localSquadIds.has(String(r.id)))
+        .map(r => r.id)
+      if (squadToDelete.length > 0) {
+        const { error: delErr } = await supabase
+          .from('squad').delete().eq('user_id', userId).in('id', squadToDelete)
+        if (delErr) console.warn('Failed to delete removed squad players from cloud:', delErr)
+      }
     }
 
     return true
