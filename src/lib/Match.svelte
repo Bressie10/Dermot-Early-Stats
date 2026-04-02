@@ -1038,14 +1038,15 @@
 
         <div class="modal-section-label">Our player involved (optional)</div>
         <div class="player-grid">
-          {#each players.filter(p => p.name?.trim()) as player}
+          {#each players as player}
+            {@const label = player.name?.trim() || `#${player.number}`}
             <button
               class="player-btn"
-              class:selected-player={puckoutOurPlayer === player.name}
-              on:click={() => puckoutOurPlayer = puckoutOurPlayer === player.name ? null : player.name}
+              class:selected-player={puckoutOurPlayer === label}
+              on:click={() => puckoutOurPlayer = puckoutOurPlayer === label ? null : label}
             >
               <span class="player-num">#{player.number}</span>
-              <span class="player-name">{player.name}</span>
+              {#if player.name?.trim()}<span class="player-name">{player.name}</span>{/if}
             </button>
           {/each}
         </div>
@@ -1141,14 +1142,15 @@
 
         <div class="modal-section-label">Which of our players was marking? (optional)</div>
         <div class="player-grid">
-          {#each players.filter(p => p.name?.trim()) as player}
+          {#each players as player}
+            {@const label = player.name?.trim() || `#${player.number}`}
             <button
               class="player-btn"
-              class:selected-player={oppScoreMarker === player.name}
-              on:click={() => oppScoreMarker = oppScoreMarker === player.name ? null : player.name}
+              class:selected-player={oppScoreMarker === label}
+              on:click={() => oppScoreMarker = oppScoreMarker === label ? null : label}
             >
               <span class="player-num">#{player.number}</span>
-              <span class="player-name">{player.name}</span>
+              {#if player.name?.trim()}<span class="player-name">{player.name}</span>{/if}
             </button>
           {/each}
         </div>
