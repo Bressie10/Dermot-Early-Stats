@@ -1098,13 +1098,15 @@
         <div class="modal-section-label">
           {puckoutOutcome === 'lost' ? 'Which opposition player won it?' : 'Opposition player number'} (optional)
         </div>
-        <input
-          class="modal-input"
-          bind:value={puckoutOppPlayer}
-          placeholder="e.g. 6"
-          type="text"
-          inputmode="numeric"
-        />
+        <div class="opp-num-grid">
+          {#each Array.from({length: 25}, (_, i) => String(i + 1)) as num}
+            <button
+              class="opp-num-btn"
+              class:selected-player={puckoutOppPlayer === num}
+              on:click={() => puckoutOppPlayer = puckoutOppPlayer === num ? '' : num}
+            >{num}</button>
+          {/each}
+        </div>
 
         <button
           class="confirm-log-btn"
@@ -1127,14 +1129,15 @@
         </div>
 
         <div class="modal-section-label">Opposition player number (optional)</div>
-        <input
-          class="modal-input"
-          bind:value={oppScorePlayerNum}
-          placeholder="e.g. 14"
-          type="text"
-          inputmode="numeric"
-          autofocus
-        />
+        <div class="opp-num-grid">
+          {#each Array.from({length: 25}, (_, i) => String(i + 1)) as num}
+            <button
+              class="opp-num-btn"
+              class:selected-player={oppScorePlayerNum === num}
+              on:click={() => oppScorePlayerNum = oppScorePlayerNum === num ? '' : num}
+            >{num}</button>
+          {/each}
+        </div>
 
         <div class="modal-section-label">Which of our players was marking? (optional)</div>
         <div class="player-grid">
@@ -1684,6 +1687,9 @@
   .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 1rem; color: var(--text); }
   .modal-section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); margin: 0.75rem 0 0.5rem; }
   .player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+  .opp-num-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 6px; }
+  .opp-num-btn { display: flex; align-items: center; justify-content: center; padding: 10px 4px; border-radius: 8px; border: 1.5px solid var(--input-border); background: var(--surface); cursor: pointer; font-family: inherit; font-size: 15px; font-weight: 600; color: var(--text); transition: all 0.15s; }
+  .opp-num-btn:active { transform: scale(0.93); border-color: var(--primary); background: rgba(var(--primary-rgb),0.08); }
   .player-btn { display: flex; flex-direction: column; align-items: center; padding: 14px 8px; border-radius: 10px; border: 1.5px solid var(--input-border); background: var(--surface); cursor: pointer; transition: all 0.15s; gap: 4px; font-family: inherit; min-height: 64px; }
   .player-btn:active { transform: scale(0.96); border-color: var(--primary); background: rgba(var(--primary-rgb),0.08); }
   .player-btn.sub { opacity: 0.7; }
