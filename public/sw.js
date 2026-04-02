@@ -1,4 +1,4 @@
-const CACHE = 'doora-v1'
+const CACHE = 'doora-v2'
 
 const PRECACHE = [
   '/',
