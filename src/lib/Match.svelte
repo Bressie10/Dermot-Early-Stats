@@ -608,6 +608,7 @@
 
   $: htBestPuckoutPlayer = htPuckoutsByPlayer.reduce((best, p) => p.won > (best?.won ?? -1) ? p : best, null)
   $: htBestOppPuckoutWinner = htPuckoutByOppPlayer[0] ?? null
+  $: htBestPuckoutZone = htPuckoutZoneRows.reduce((best, z) => z.won > (best?.won ?? -1) ? z : best, null)
   $: htBiggestConcededOppPlayer = htConcededByOppPlayer[0] ?? null
 
   $: htTopScorer = (() => {
@@ -1208,9 +1209,23 @@
         <div class="accordion-body">
           {#if htBestPuckoutPlayer}
             <div class="standout-row">
-              <span class="standout-label">Best</span>
+              <span class="standout-label">Best player</span>
               <span class="standout-name">{htBestPuckoutPlayer.name}</span>
               <span class="standout-val">{htBestPuckoutPlayer.won}W / {htBestPuckoutPlayer.lost}L</span>
+            </div>
+          {/if}
+          {#if htBestPuckoutZone}
+            <div class="standout-row">
+              <span class="standout-label">Top zone</span>
+              <span class="standout-name">{htBestPuckoutZone.label}</span>
+              <span class="standout-val">{htBestPuckoutZone.won}W {htBestPuckoutZone.lost}L · {htBestPuckoutZone.winPct}%</span>
+            </div>
+          {/if}
+          {#if htBestOppPuckoutWinner}
+            <div class="standout-row danger">
+              <span class="standout-label">Opp threat</span>
+              <span class="standout-name">{htBestOppPuckoutWinner.num}</span>
+              <span class="standout-val">{htBestOppPuckoutWinner.count} puckout{htBestOppPuckoutWinner.count > 1 ? 's' : ''} won</span>
             </div>
           {/if}
           <!-- Overall stats row -->
