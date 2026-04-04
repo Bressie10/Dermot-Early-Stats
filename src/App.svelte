@@ -10,10 +10,14 @@ import { clearAllData } from './lib/db.js'
   import Settings from './lib/Settings.svelte'
   import StatTargets from './lib/StatTargets.svelte'
   import Auth from './lib/Auth.svelte'
+  import LiveViewer from './lib/LiveViewer.svelte'
   import { user, authLoading, signOut } from './lib/auth-store.js'
   import { syncToSupabase, syncFromSupabase } from './lib/sync.js'
   import { settingsStore } from './lib/settings-store.js'
+  import { supabase } from './lib/supabase.js'
   import { onMount } from 'svelte'
+
+  let liveSession = null
 
   function hexToRgbString(hex) {
     const r = parseInt(hex.slice(1,3), 16)
@@ -90,10 +94,21 @@ import { clearAllData } from './lib/db.js'
           await syncFromSupabase(u.id)
           dataReady = true
         }
+
+        // Check for active live session from another coach
+        const { data: sessions } = await supabase
+          .from('live_sessions')
+          .select('*')
+          .is('ended_at', null)
+          .neq('host_user_id', u.id)
+          .order('started_at', { ascending: false })
+          .limit(1)
+        liveSession = sessions?.[0] ?? null
       }
       if (!u) {
         lastUserId = null
         dataReady = false
+        liveSession = null
       }
     })
     return unsubscribe
@@ -134,6 +149,7 @@ import { clearAllData } from './lib/db.js'
 {:else if !$user}
   <Auth />
 
+
 {:else if !dataReady}
   <div class="loading-screen">
     <img src="doora-barefield.png" alt="Doora Barefield GAA" class="loading-logo">
@@ -141,6 +157,15 @@ import { clearAllData } from './lib/db.js'
   </div>
 
 {:else}
+  {#if liveSession}
+    <div class="live-banner" on:click={() => activePage = 'live'}>
+      <span class="live-dot"></span>
+      <strong>Live match in progress</strong>
+      <span>Tap to watch</span>
+      <button class="live-banner-close" on:click|stopPropagation={() => liveSession = null}>✕</button>
+    </div>
+  {/if}
+
   <div class="app">
     <!-- Top bar: brand + desktop tabs + actions -->
     <nav class="top-nav">
@@ -205,7 +230,9 @@ import { clearAllData } from './lib/db.js'
     </nav>
 
     <main>
-      {#if activePage === 'match'}
+      {#if activePage === 'live' && liveSession}
+        <LiveViewer session={liveSession} onClose={() => { activePage = 'match'; liveSession = null }} />
+      {:else if activePage === 'match'}
         <Match />
       {:else if activePage === 'timeline'}
         <Timeline />
@@ -442,6 +469,21 @@ import { clearAllData } from './lib/db.js'
 
   @keyframes spin { to { transform: rotate(360deg); } }
   .spin { animation: spin 1s linear infinite; }
+
+  /* ── LIVE BANNER ── */
+  .live-banner {
+    display: flex; align-items: center; gap: 8px;
+    background: #e53935; color: white;
+    padding: 10px 16px; font-size: 13px; font-weight: 600;
+    cursor: pointer; position: sticky; top: 0; z-index: 200;
+  }
+  .live-banner span:not(.live-dot) { font-size: 12px; font-weight: 400; opacity: 0.85; margin-left: 4px; flex: 1; }
+  .live-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: white; flex-shrink: 0;
+    animation: live-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes live-pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .live-banner-close { background: none; border: none; color: white; font-size: 14px; cursor: pointer; opacity: 0.7; padding: 0 4px; }
 
   /* ── MAIN CONTENT ── */
   main {
